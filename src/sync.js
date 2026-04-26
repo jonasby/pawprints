@@ -69,13 +69,28 @@ export function createRemoteSync(storage, { getSettings, loadEvents, onStatusCha
         });
       }, SYNC_DEBOUNCE_MS);
     },
-    async refreshAuth() {
+    async getCurrentUser() {
       try {
         const response = await fetch(createApiUrl("/api/auth/me"), { credentials: "include" });
-        onStatusChange?.(response.ok ? "Signed in" : "Sign in to sync");
+        if (!response.ok) {
+          onStatusChange?.("Sign in to sync");
+          return null;
+        }
+
+        const user = await response.json();
+        onStatusChange?.("Signed in");
+        return user;
       } catch {
         onStatusChange?.("Offline");
+        return null;
       }
+    },
+    async signOut() {
+      await fetch(createApiUrl("/api/auth/logout"), {
+        method: "POST",
+        credentials: "include",
+      });
+      onStatusChange?.("Signed out");
     },
   };
 }

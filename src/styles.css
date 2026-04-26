@@ -246,6 +246,35 @@ h2 {
   text-transform: none;
 }
 
+.login-facade {
+  display: grid;
+  gap: 12px;
+  max-width: 420px;
+}
+
+.login-facade p {
+  margin-bottom: 0;
+  color: #6b4f3c;
+}
+
+.primary-link {
+  display: inline-flex;
+  width: fit-content;
+  border-radius: 999px;
+  padding: 10px 14px;
+  color: #fff;
+  background: #9a5a20;
+  font-weight: 850;
+  text-decoration: none;
+}
+
+.primary-link:hover,
+.primary-link:focus-visible {
+  background: #7c4215;
+  outline: 2px solid #fdba74;
+  outline-offset: 2px;
+}
+
 .event-list {
   display: grid;
   gap: 2px;

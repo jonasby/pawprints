@@ -177,14 +177,22 @@ export function renderPuppyLog() {
   const nextDayButton = document.querySelector("[data-next-day]");
   const addStatus = document.querySelector("[data-add-status]");
   const syncStatus = document.querySelector("[data-sync-status]");
+  const appSections = document.querySelectorAll("[data-app-section]");
+  const loginPanel = document.querySelector("[data-login-panel]");
   const authUrlElements = document.querySelectorAll("[data-auth-url]");
+  const logoutForm = document.querySelector("[data-auth-url='/api/auth/logout']");
   const settings = loadSettings();
   const todayKey = getTodayKey();
+  let isSignedIn = false;
   const remoteSync = createRemoteSync(window.localStorage, {
     getSettings: () => settings,
     loadEvents: getStoredEvents,
     onStatusChange(status) {
       syncStatus.textContent = status;
+    },
+    onAuthStateChange(authState) {
+      isSignedIn = authState === "signed-in";
+      renderState();
     },
   });
 
@@ -218,6 +226,14 @@ export function renderPuppyLog() {
     const selectedDate = createLogDate(selectedDateKey);
     const isSetupComplete = hasRequiredSettings(settings);
 
+    loginPanel.hidden = isSignedIn;
+    appSections.forEach((section) => {
+      section.toggleAttribute("hidden", !isSignedIn);
+    });
+    if (!isSignedIn) {
+      return;
+    }
+
     setupPanel.open = !isSetupComplete;
     setupPanel.classList.toggle("is-required", !isSetupComplete);
     setupStatus.textContent = isSetupComplete ? "Edit" : "Required";
@@ -238,6 +254,14 @@ export function renderPuppyLog() {
       settings,
     });
   };
+
+  logoutForm.addEventListener("submit", (event) => {
+    event.preventDefault();
+    remoteSync.signOut().then(() => {
+      syncStatus.textContent = "Signed out";
+      renderState();
+    });
+  });
 
   const saveAndSync = () => {
     saveSettings(settings);
@@ -343,6 +367,9 @@ export function renderPuppyLog() {
   });
 
   renderButtons(eventButtons);
-  remoteSync.refreshAuth();
+  remoteSync.getCurrentUser().then((user) => {
+    isSignedIn = Boolean(user);
+    renderState();
+  });
   renderState();
 }

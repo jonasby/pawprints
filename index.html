@@ -17,7 +17,7 @@
             <h1 id="app-title">PawPrints</h1>
           </div>
         </div>
-        <div class="auth-bar">
+        <div class="auth-bar" data-app-section hidden>
           <a href="/api/auth/login" data-auth-url="/api/auth/login">Sign in with Google</a>
           <form action="/api/auth/logout" method="post" data-auth-url="/api/auth/logout">
             <button type="submit">Sign out</button>
@@ -26,7 +26,16 @@
         </div>
       </section>
 
-      <section class="card settings" aria-labelledby="settings-title">
+      <section class="card login-facade" data-login-panel aria-labelledby="login-title">
+        <h2 id="login-title">Sign in to PawPrints</h2>
+        <p>Your puppy log is private. Sign in with Google to sync it securely.</p>
+        <a class="primary-link" href="/api/auth/login" data-auth-url="/api/auth/login">
+          Sign in with Google
+        </a>
+        <p class="sync-status" data-login-status aria-live="polite"></p>
+      </section>
+
+      <section class="card settings" aria-labelledby="settings-title" data-app-section hidden>
         <div class="section-heading">
           <h2 id="settings-title">Day</h2>
           <div class="day-nav" aria-label="Log day navigation">
@@ -61,7 +70,7 @@
         </details>
       </section>
 
-      <section class="card recorder" aria-labelledby="record-event-title" data-activity-section>
+      <section class="card recorder" aria-labelledby="record-event-title" data-app-section data-activity-section hidden>
         <div class="section-heading">
           <h2 id="record-event-title">Add event</h2>
           <p class="add-status" data-add-status aria-live="polite"></p>
@@ -74,7 +83,7 @@
         ></div>
       </section>
 
-      <section class="card history" aria-labelledby="today-events-title" data-activity-section>
+      <section class="card history" aria-labelledby="today-events-title" data-app-section data-activity-section hidden>
         <div class="section-heading">
           <h2 id="today-events-title">Log</h2>
         </div>
