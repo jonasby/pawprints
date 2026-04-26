@@ -20,12 +20,6 @@ principal and stores a separate snapshot per email address.
 The production App Service uses `ConnectionStrings__PawPrintsDb` with Azure SQL managed identity.
 Local development falls back to `pawprints-local.db` when no connection string is configured.
 
-## Hosting
-
-The API serves the built Vite frontend from `wwwroot` in production so the app
-and API share the same `azurewebsites.net` origin. That keeps the auth cookie
-first-party after Google sign-in, including on mobile browsers.
-
 ## CORS
 
 Set `AllowedOrigins__0`, `AllowedOrigins__1`, and so on for any separate frontend origins.

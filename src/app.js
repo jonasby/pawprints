@@ -12,7 +12,6 @@ import {
   replaceStoredEvents,
   updateEventsTime,
 } from "./events.js";
-import { redirectToCanonicalHost } from "./hosting.js";
 import { createApiUrl, createRemoteSync } from "./sync.js";
 
 const dateFormatter = new Intl.DateTimeFormat(undefined, {
@@ -171,10 +170,6 @@ function renderEvents({ eventList, emptyState, logSummary, date, dateKey, settin
 }
 
 export function renderPuppyLog() {
-  if (redirectToCanonicalHost()) {
-    return;
-  }
-
   const eventButtons = document.querySelector("[data-event-buttons]");
   const eventList = document.querySelector("[data-event-list]");
   const emptyState = document.querySelector("[data-empty-state]");

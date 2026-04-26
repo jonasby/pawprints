@@ -37,12 +37,7 @@ jobs:
         run: dotnet test PawPrints.sln --configuration Release
 
       - name: Publish API
-        run: |
-          npm ci
-          VITE_CANONICAL_APP_URL="" VITE_API_BASE_URL="" npm run build
-          dotnet publish backend/PawPrints.Api/PawPrints.Api.csproj --configuration Release --output api-publish
-          mkdir -p api-publish/wwwroot
-          cp -R dist/* api-publish/wwwroot/
+        run: dotnet publish backend/PawPrints.Api/PawPrints.Api.csproj --configuration Release --output api-publish
 
       - name: Azure login
         uses: azure/login@v2

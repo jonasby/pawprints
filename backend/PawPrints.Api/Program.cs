@@ -139,8 +139,6 @@ if (app.Environment.IsDevelopment())
     app.UseSwaggerUI();
 }
 
-app.UseDefaultFiles();
-app.UseStaticFiles();
 app.UseCors("Frontend");
 app.UseAuthentication();
 app.UseAuthorization();
@@ -203,8 +201,6 @@ app.MapPut(
         return Results.NoContent();
     }
 );
-
-app.MapFallbackToFile("index.html");
 
 app.Run();
 
