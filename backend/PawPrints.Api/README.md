@@ -9,6 +9,9 @@ Google authentication is enabled when these app settings are present:
 - `Authentication__Google__ClientId`
 - `Authentication__Google__ClientSecret`
 
+The API also accepts the common alternatives `Google__ClientId` /
+`Google__ClientSecret` and `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET`.
+
 Only `jon.asby@gmail.com` is authorized by the API policy.
 
 ## Database

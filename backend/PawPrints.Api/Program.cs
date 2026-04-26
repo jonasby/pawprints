@@ -42,8 +42,20 @@ builder.Services.AddDbContext<PawPrintsDbContext>(options =>
     options.UseSqlServer(connectionString);
 });
 
-var googleClientId = builder.Configuration["Authentication:Google:ClientId"];
-var googleClientSecret = builder.Configuration["Authentication:Google:ClientSecret"];
+var googleClientId = ProgramConfiguration.GetFirstConfiguredValue(
+    builder.Configuration,
+    "Authentication:Google:ClientId",
+    "Google:ClientId",
+    "GOOGLE_CLIENT_ID",
+    "GOOGLE_OAUTH_CLIENT_ID"
+);
+var googleClientSecret = ProgramConfiguration.GetFirstConfiguredValue(
+    builder.Configuration,
+    "Authentication:Google:ClientSecret",
+    "Google:ClientSecret",
+    "GOOGLE_CLIENT_SECRET",
+    "GOOGLE_OAUTH_CLIENT_SECRET"
+);
 var googleAuthConfigured = !string.IsNullOrWhiteSpace(googleClientId)
     && !string.IsNullOrWhiteSpace(googleClientSecret);
 
@@ -134,16 +146,21 @@ app.UseAuthorization();
 
 app.MapGet("/api/auth/login", (string? returnUrl) =>
 {
+    if (!googleAuthConfigured)
+    {
+        return Results.Problem(
+            title: "Google sign-in is not configured.",
+            detail: "Set Authentication__Google__ClientId and Authentication__Google__ClientSecret on the API App Service.",
+            statusCode: StatusCodes.Status503ServiceUnavailable
+        );
+    }
+
     var properties = new AuthenticationProperties
     {
         RedirectUri = string.IsNullOrWhiteSpace(returnUrl) ? "/" : returnUrl,
     };
 
-    var scheme = googleAuthConfigured
-        ? GoogleDefaults.AuthenticationScheme
-        : CookieAuthenticationDefaults.AuthenticationScheme;
-
-    return Results.Challenge(properties, [scheme]);
+    return Results.Challenge(properties, [GoogleDefaults.AuthenticationScheme]);
 });
 
 app.MapPost("/api/auth/logout", async (HttpContext httpContext) =>
@@ -175,3 +192,13 @@ app.MapPut(
 app.Run();
 
 public partial class Program;
+
+static partial class ProgramConfiguration
+{
+    public static string? GetFirstConfiguredValue(IConfiguration configuration, params string[] keys)
+    {
+        return keys
+            .Select(key => configuration[key])
+            .FirstOrDefault(value => !string.IsNullOrWhiteSpace(value));
+    }
+}
