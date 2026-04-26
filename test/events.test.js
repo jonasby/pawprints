@@ -35,7 +35,7 @@ test("GivenAValidEventType_WhenCreatingAnEvent_ThenItIncludesDisplayMetadata", (
   assert.equal(event.type, "pee");
   assert.equal(event.occurredAt, "2026-04-26T07:00:00.000Z");
   assert.equal(event.dateKey, "2026-04-26");
-  assert.match(event.id, /^1745650800000-pee-/);
+  assert.match(event.id, /^1777186800000-pee-/);
 });
 
 test("GivenAnUnknownEventType_WhenCreatingAnEvent_ThenItIsRejected", () => {
