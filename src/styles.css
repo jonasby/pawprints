@@ -53,7 +53,8 @@ button {
 
 .eyebrow,
 .log-summary,
-.add-status {
+.add-status,
+.sync-status {
   margin: 0;
   color: #9a5a20;
   font-size: 0.82rem;
@@ -222,6 +223,25 @@ h2 {
   min-height: 1.1rem;
   margin-top: 10px;
   color: #c2410c;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.auth-actions {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+.auth-link {
+  color: #9a5a20;
+  font-size: 0.82rem;
+  font-weight: 850;
+}
+
+.sync-status {
+  min-height: 1.1rem;
+  margin-top: 10px;
   letter-spacing: 0;
   text-transform: none;
 }

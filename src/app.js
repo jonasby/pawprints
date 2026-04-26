@@ -5,11 +5,13 @@ import {
   getPuppyAgeLabel,
   getEventType,
   getEventsForDate,
+  getStoredEvents,
   getTodayKey,
   getTrackingDay,
   removeEvent,
   updateEventsTime,
 } from "./events.js";
+import { createRemoteSync } from "./sync.js";
 
 const dateFormatter = new Intl.DateTimeFormat(undefined, {
   month: "short",
@@ -174,8 +176,21 @@ export function renderPuppyLog() {
   const previousDayButton = document.querySelector("[data-previous-day]");
   const nextDayButton = document.querySelector("[data-next-day]");
   const addStatus = document.querySelector("[data-add-status]");
+  const syncStatus = document.querySelector("[data-sync-status]");
+  const loginLink = document.querySelector("[data-login-link]");
+  const logoutForm = document.querySelector("[data-logout-form]");
   const settings = loadSettings();
   const todayKey = getTodayKey();
+  const remoteSync = createRemoteSync(window.localStorage, {
+    getSettings: () => settings,
+    loadEvents: getStoredEvents,
+    onStatusChange(status) {
+      syncStatus.textContent = status;
+    },
+  });
+
+  loginLink.href = remoteSync.createApiUrl("/api/auth/login");
+  logoutForm.action = remoteSync.createApiUrl("/api/auth/logout");
 
   let selectedDateKey = todayKey;
 
@@ -211,6 +226,11 @@ export function renderPuppyLog() {
     });
   };
 
+  const saveAndSync = () => {
+    saveSettings(settings);
+    remoteSync.schedule();
+  };
+
   eventButtons.addEventListener("click", (event) => {
     const button = event.target.closest("[data-event-type]");
     if (!button) return;
@@ -230,6 +250,7 @@ export function renderPuppyLog() {
 
     addStatus.textContent =
       addedEvents.length === 0 ? "Choose today or an earlier log day." : "";
+    remoteSync.schedule();
     renderState();
   });
 
@@ -238,6 +259,7 @@ export function renderPuppyLog() {
     if (!button) return;
 
     removeEvent(window.localStorage, button.dataset.removeEvent, createLogDate(selectedDateKey));
+    remoteSync.schedule();
     renderState();
   });
 
@@ -251,6 +273,7 @@ export function renderPuppyLog() {
       input.value,
       createLogDate(selectedDateKey),
     );
+    remoteSync.schedule();
     renderState();
   });
 
@@ -274,14 +297,14 @@ export function renderPuppyLog() {
       selectedDateKey = settings.arrivalDate;
       logDateInput.value = selectedDateKey;
     }
-    saveSettings(settings);
+    saveAndSync();
     addStatus.textContent = "";
     renderState();
   });
 
   birthDateInput.addEventListener("change", () => {
     settings.birthDate = birthDateInput.value;
-    saveSettings(settings);
+    saveAndSync();
     addStatus.textContent = "";
     renderState();
   });
@@ -307,5 +330,6 @@ export function renderPuppyLog() {
   });
 
   renderButtons(eventButtons);
+  remoteSync.refreshAuth();
   renderState();
 }

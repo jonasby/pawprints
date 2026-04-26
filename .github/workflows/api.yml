@@ -1,0 +1,53 @@
+name: Deploy API to Azure
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "backend/**"
+      - "tests/PawPrints.Api.Tests/**"
+      - "PawPrints.sln"
+      - ".github/workflows/api.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  AZURE_CLIENT_ID: 619f3646-cb96-4699-a283-7cf276be42ee
+  AZURE_TENANT_ID: 86447cc8-41de-4a89-b777-2f7a3ffdc1a3
+  AZURE_SUBSCRIPTION_ID: 6d4154fe-9792-481f-9ecd-aa69f09e0074
+  AZURE_WEBAPP_NAME: pawprints-api-6d4154
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Test API
+        run: dotnet test PawPrints.sln --configuration Release
+
+      - name: Publish API
+        run: dotnet publish backend/PawPrints.Api/PawPrints.Api.csproj --configuration Release --output api-publish
+
+      - name: Azure login
+        uses: azure/login@v2
+        with:
+          client-id: ${{ env.AZURE_CLIENT_ID }}
+          tenant-id: ${{ env.AZURE_TENANT_ID }}
+          subscription-id: ${{ env.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Deploy API
+        uses: azure/webapps-deploy@v3
+        with:
+          app-name: ${{ env.AZURE_WEBAPP_NAME }}
+          package: api-publish

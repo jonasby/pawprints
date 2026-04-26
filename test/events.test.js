@@ -10,6 +10,7 @@ import {
   getPuppyAgeLabel,
   getEventsForDate,
   getStorageKey,
+  getStoredEvents,
   getTodayKey,
   getTrackingDay,
   loadEventsForDate,
@@ -29,6 +30,12 @@ function createMemoryStorage(seed = {}) {
     },
     removeItem(key) {
       values.delete(key);
+    },
+    key(index) {
+      return Array.from(values.keys())[index] ?? null;
+    },
+    get length() {
+      return values.size;
     },
   };
 }
@@ -250,4 +257,21 @@ test("GivenLatestEventIsAfterNow_WhenAddingAnEvent_ThenNoEarlierEventIsStored", 
 test("GivenArrivalAndBirthDates_WhenCalculatingDayAndAge_ThenTheyUseTheLogDate", () => {
   assert.equal(getTrackingDay("2026-04-19", "2026-04-26"), 8);
   assert.equal(getPuppyAgeLabel("2026-02-22", "2026-04-26"), "9 weeks");
+});
+
+test("GivenEventsAcrossDays_WhenGettingStoredEvents_ThenAllPuppyEventsAreReturnedNewestFirst", () => {
+  const storage = createMemoryStorage({
+    [getStorageKey("2026-04-25")]: JSON.stringify([
+      createEvent("sleep", new Date("2026-04-25T22:00:00.000Z")),
+    ]),
+    [getStorageKey("2026-04-26")]: JSON.stringify([
+      createEvent("wake", new Date("2026-04-26T07:00:00.000Z")),
+    ]),
+    "other-key": JSON.stringify([createEvent("pee", new Date("2026-04-26T08:00:00.000Z"))]),
+  });
+
+  assert.deepEqual(
+    getStoredEvents(storage).map((event) => event.type),
+    ["wake", "sleep"],
+  );
 });

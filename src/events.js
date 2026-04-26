@@ -29,6 +29,25 @@ export function getStorageKey(dateKey) {
   return `${STORAGE_PREFIX}:${dateKey}`;
 }
 
+export function getDateKeyFromStorageKey(storageKey) {
+  return storageKey.startsWith(`${STORAGE_PREFIX}:`)
+    ? storageKey.slice(STORAGE_PREFIX.length + 1)
+    : "";
+}
+
+export function getStoredDateKeys(storage) {
+  const dateKeys = [];
+
+  for (let index = 0; index < storage.length; index += 1) {
+    const key = storage.key(index);
+    if (key?.startsWith(`${STORAGE_PREFIX}:`)) {
+      dateKeys.push(key.slice(STORAGE_PREFIX.length + 1));
+    }
+  }
+
+  return dateKeys.sort();
+}
+
 export function createLocalDate(dateKey) {
   const [year, month, day] = dateKey.split("-").map(Number);
 
@@ -197,6 +216,12 @@ export function saveEventsForDate(storage, dateKey, events) {
 
 export function getEventsForDate(storage, date = new Date()) {
   return loadEventsForDate(storage, getTodayKey(date));
+}
+
+export function getStoredEvents(storage) {
+  return getStoredDateKeys(storage)
+    .flatMap((dateKey) => loadEventsForDate(storage, dateKey))
+    .sort((first, second) => new Date(second.occurredAt) - new Date(first.occurredAt));
 }
 
 export function addEvent(storage, event) {
