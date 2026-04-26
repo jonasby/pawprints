@@ -2,7 +2,6 @@ import {
   EVENT_TYPES,
   addEventWithDefaults,
   formatCompactTimeValue,
-  formatTimeInputValue,
   getPuppyAgeLabel,
   getEventType,
   getEventsForDate,
@@ -20,7 +19,7 @@ const dateFormatter = new Intl.DateTimeFormat(undefined, {
 const SETTINGS_KEY = "pawprints-settings";
 
 const defaultSettings = {
-  arrivalDate: getTodayKey(),
+  arrivalDate: "",
   birthDate: "",
 };
 
@@ -62,6 +61,17 @@ function createLogDate(dateKey) {
   return new Date(year, month - 1, day);
 }
 
+function shiftDateKey(dateKey, dayOffset) {
+  const date = createLogDate(dateKey);
+  date.setDate(date.getDate() + dayOffset);
+
+  return getTodayKey(date);
+}
+
+function hasRequiredSettings(settings) {
+  return Boolean(settings.arrivalDate && settings.birthDate);
+}
+
 function getEventGroups(events) {
   const groups = new Map();
 
@@ -80,7 +90,7 @@ function getEventGroups(events) {
 }
 
 function getLogSummary({ date, dateKey, settings, events }) {
-  const day = getTrackingDay(settings.arrivalDate, dateKey);
+  const day = settings.arrivalDate ? getTrackingDay(settings.arrivalDate, dateKey) : 1;
   const ageLabel = getPuppyAgeLabel(settings.birthDate, dateKey);
   const pieces = [`Day ${day}`, dateFormatter.format(date)];
 
@@ -154,10 +164,15 @@ export function renderPuppyLog() {
   const eventButtons = document.querySelector("[data-event-buttons]");
   const eventList = document.querySelector("[data-event-list]");
   const emptyState = document.querySelector("[data-empty-state]");
+  const activitySections = document.querySelectorAll("[data-activity-section]");
+  const setupPanel = document.querySelector("[data-setup-panel]");
+  const setupStatus = document.querySelector("[data-setup-status]");
   const logDateInput = document.querySelector("[data-log-date]");
   const arrivalDateInput = document.querySelector("[data-arrival-date]");
   const birthDateInput = document.querySelector("[data-birth-date]");
   const logSummary = document.querySelector("[data-log-summary]");
+  const previousDayButton = document.querySelector("[data-previous-day]");
+  const nextDayButton = document.querySelector("[data-next-day]");
   const addStatus = document.querySelector("[data-add-status]");
   const settings = loadSettings();
   const todayKey = getTodayKey();
@@ -173,6 +188,18 @@ export function renderPuppyLog() {
 
   const renderState = () => {
     const selectedDate = createLogDate(selectedDateKey);
+    const isSetupComplete = hasRequiredSettings(settings);
+
+    setupPanel.open = !isSetupComplete;
+    setupPanel.classList.toggle("is-required", !isSetupComplete);
+    setupStatus.textContent = isSetupComplete ? "Edit" : "Required";
+    logDateInput.min = settings.arrivalDate || "";
+    activitySections.forEach((section) => {
+      section.toggleAttribute("hidden", !isSetupComplete);
+    });
+    addStatus.textContent = isSetupComplete ? addStatus.textContent : "Add arrival and birth dates first.";
+    previousDayButton.disabled = !settings.arrivalDate || selectedDateKey <= settings.arrivalDate;
+    nextDayButton.disabled = selectedDateKey >= todayKey;
 
     renderEvents({
       eventList,
@@ -187,6 +214,12 @@ export function renderPuppyLog() {
   eventButtons.addEventListener("click", (event) => {
     const button = event.target.closest("[data-event-type]");
     if (!button) return;
+
+    if (!hasRequiredSettings(settings)) {
+      addStatus.textContent = "Add arrival and birth dates first.";
+      renderState();
+      return;
+    }
 
     const addedEvents = addEventWithDefaults(
       window.localStorage,
@@ -223,19 +256,53 @@ export function renderPuppyLog() {
 
   logDateInput.addEventListener("change", () => {
     selectedDateKey = logDateInput.value || todayKey;
+    if (selectedDateKey > todayKey) {
+      selectedDateKey = todayKey;
+      logDateInput.value = selectedDateKey;
+    }
+    if (settings.arrivalDate && selectedDateKey < settings.arrivalDate) {
+      selectedDateKey = settings.arrivalDate;
+      logDateInput.value = selectedDateKey;
+    }
     addStatus.textContent = "";
     renderState();
   });
 
   arrivalDateInput.addEventListener("change", () => {
-    settings.arrivalDate = arrivalDateInput.value || todayKey;
+    settings.arrivalDate = arrivalDateInput.value;
+    if (settings.arrivalDate && selectedDateKey < settings.arrivalDate) {
+      selectedDateKey = settings.arrivalDate;
+      logDateInput.value = selectedDateKey;
+    }
     saveSettings(settings);
+    addStatus.textContent = "";
     renderState();
   });
 
   birthDateInput.addEventListener("change", () => {
     settings.birthDate = birthDateInput.value;
     saveSettings(settings);
+    addStatus.textContent = "";
+    renderState();
+  });
+
+  previousDayButton.addEventListener("click", () => {
+    selectedDateKey = shiftDateKey(selectedDateKey, -1);
+    if (settings.arrivalDate && selectedDateKey < settings.arrivalDate) {
+      selectedDateKey = settings.arrivalDate;
+    }
+    logDateInput.value = selectedDateKey;
+    addStatus.textContent = "";
+    renderState();
+  });
+
+  nextDayButton.addEventListener("click", () => {
+    selectedDateKey = shiftDateKey(selectedDateKey, 1);
+    if (selectedDateKey > todayKey) {
+      selectedDateKey = todayKey;
+    }
+    logDateInput.value = selectedDateKey;
+    addStatus.textContent = "";
     renderState();
   });
 

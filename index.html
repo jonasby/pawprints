@@ -17,31 +17,44 @@
             <h1 id="app-title">PawPrints</h1>
           </div>
         </div>
-        <p class="subtitle">Tap an event. Adjust the time inline.</p>
       </section>
 
       <section class="card settings" aria-labelledby="settings-title">
         <div class="section-heading">
           <h2 id="settings-title">Day</h2>
-          <p class="log-summary" data-log-summary></p>
+          <div class="day-nav" aria-label="Log day navigation">
+            <button class="day-nav-button" type="button" data-previous-day aria-label="Previous day">
+              -
+            </button>
+            <p class="log-summary" data-log-summary></p>
+            <button class="day-nav-button" type="button" data-next-day aria-label="Next day">
+              +
+            </button>
+          </div>
         </div>
-        <div class="settings-grid">
-          <label class="field">
-            <span>Log date</span>
-            <input type="date" data-log-date />
-          </label>
-          <label class="field">
-            <span>Arrival date</span>
-            <input type="date" data-arrival-date />
-          </label>
-          <label class="field">
-            <span>Birth date</span>
-            <input type="date" data-birth-date />
-          </label>
-        </div>
+        <details class="setup-panel" data-setup-panel>
+          <summary>
+            <span>Setup</span>
+            <span class="setup-status" data-setup-status></span>
+          </summary>
+          <div class="settings-grid">
+            <label class="field">
+              <span>Log date</span>
+              <input type="date" data-log-date />
+            </label>
+            <label class="field">
+              <span>Arrival date</span>
+              <input type="date" data-arrival-date required />
+            </label>
+            <label class="field">
+              <span>Birth date</span>
+              <input type="date" data-birth-date required />
+            </label>
+          </div>
+        </details>
       </section>
 
-      <section class="card recorder" aria-labelledby="record-event-title">
+      <section class="card recorder" aria-labelledby="record-event-title" data-activity-section>
         <div class="section-heading">
           <h2 id="record-event-title">Add event</h2>
           <p class="add-status" data-add-status aria-live="polite"></p>
@@ -54,7 +67,7 @@
         ></div>
       </section>
 
-      <section class="card history" aria-labelledby="today-events-title">
+      <section class="card history" aria-labelledby="today-events-title" data-activity-section>
         <div class="section-heading">
           <h2 id="today-events-title">Log</h2>
         </div>
