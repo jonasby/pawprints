@@ -4,11 +4,15 @@ import assert from "node:assert/strict";
 import {
   EVENT_TYPES,
   addEvent,
+  addEventWithDefaults,
   createEvent,
+  formatTimeInputValue,
   getEventsForDate,
+  getStorageKey,
   getTodayKey,
   loadEventsForDate,
   saveEventsForDate,
+  updateEventsTime,
 } from "../src/events.js";
 
 function createMemoryStorage(seed = {}) {
@@ -109,6 +113,88 @@ test("GivenALocalDate_WhenGettingTodayKey_ThenItUsesCalendarDateFormat", () => {
 test("GivenSupportedEventTypes_WhenRendered_ThenTheyCoverInitialPuppyEvents", () => {
   assert.deepEqual(
     EVENT_TYPES.map((eventType) => eventType.id),
-    ["pee", "poop", "eat", "nap", "sleep"],
+    ["pee", "poop", "eat", "nap", "sleep", "wake"],
+  );
+});
+
+test("GivenANapWasThePreviousEvent_WhenAddingWake_ThenItDefaultsToOneHourLater", () => {
+  const dateKey = "2026-04-26";
+  const nap = createEvent("nap", new Date("2026-04-26T08:10:00.000Z"));
+  const storage = createMemoryStorage({
+    [getStorageKey(dateKey)]: JSON.stringify([nap]),
+  });
+
+  addEventWithDefaults(storage, "wake", new Date("2026-04-26T09:45:00.000Z"));
+
+  const events = loadEventsForDate(storage, dateKey);
+  assert.deepEqual(
+    events.map((event) => [event.type, event.occurredAt]),
+    [
+      ["wake", "2026-04-26T09:10:00.000Z"],
+      ["nap", "2026-04-26T08:10:00.000Z"],
+    ],
+  );
+});
+
+test("GivenASuggestedEventFallsOnTomorrow_WhenAddingIt_ThenItIsStoredUnderTomorrow", () => {
+  const todayKey = "2026-04-26";
+  const tomorrowKey = "2026-04-27";
+  const nap = createEvent("nap", new Date("2026-04-26T23:30:00.000Z"));
+  const storage = createMemoryStorage({
+    [getStorageKey(todayKey)]: JSON.stringify([nap]),
+  });
+
+  addEventWithDefaults(storage, "wake", new Date("2026-04-26T23:40:00.000Z"));
+
+  assert.deepEqual(
+    loadEventsForDate(storage, todayKey).map((event) => event.type),
+    ["nap"],
+  );
+  assert.deepEqual(
+    loadEventsForDate(storage, tomorrowKey).map((event) => event.type),
+    ["wake"],
+  );
+});
+
+test("GivenASleepingEventWasPrevious_WhenAddingWee_ThenWakeIsAddedAtTheSameTime", () => {
+  const dateKey = "2026-04-26";
+  const sleep = createEvent("sleep", new Date("2026-04-26T06:00:00.000Z"));
+  const storage = createMemoryStorage({
+    [getStorageKey(dateKey)]: JSON.stringify([sleep]),
+  });
+
+  addEventWithDefaults(storage, "pee", new Date("2026-04-26T07:30:00.000Z"));
+
+  const events = loadEventsForDate(storage, dateKey);
+  assert.deepEqual(
+    events.map((event) => [event.type, event.occurredAt]),
+    [
+      ["wake", "2026-04-26T07:00:00.000Z"],
+      ["pee", "2026-04-26T07:00:00.000Z"],
+      ["sleep", "2026-04-26T06:00:00.000Z"],
+    ],
+  );
+});
+
+test("GivenEventsAtTheSameTimestamp_WhenUpdatingTheirTime_ThenTheyMoveTogether", () => {
+  const date = new Date("2026-04-26T12:00:00");
+  const dateKey = "2026-04-26";
+  const wake = createEvent("wake", new Date("2026-04-26T07:00:00.000Z"));
+  const pee = createEvent("pee", new Date("2026-04-26T07:00:00.000Z"));
+  const storage = createMemoryStorage({
+    [getStorageKey(dateKey)]: JSON.stringify([wake, pee]),
+  });
+
+  updateEventsTime(storage, [wake.id, pee.id], "07:20", date);
+
+  assert.deepEqual(
+    loadEventsForDate(storage, dateKey).map((event) => [
+      event.type,
+      formatTimeInputValue(event.occurredAt),
+    ]),
+    [
+      ["wake", "07:20"],
+      ["pee", "07:20"],
+    ],
   );
 });
