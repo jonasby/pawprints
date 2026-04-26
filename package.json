@@ -1,0 +1,14 @@
+{
+  "name": "puppy-event-log",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test",
+    "start": "vite --host 0.0.0.0",
+    "build": "vite build"
+  },
+  "devDependencies": {
+    "vite": "latest"
+  }
+}
