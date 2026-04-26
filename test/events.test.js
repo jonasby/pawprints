@@ -14,6 +14,7 @@ import {
   getTodayKey,
   getTrackingDay,
   loadEventsForDate,
+  replaceStoredEvents,
   saveEventsForDate,
   updateEventsTime,
 } from "../src/events.js";
@@ -273,5 +274,29 @@ test("GivenEventsAcrossDays_WhenGettingStoredEvents_ThenAllPuppyEventsAreReturne
   assert.deepEqual(
     getStoredEvents(storage).map((event) => event.type),
     ["wake", "sleep"],
+  );
+});
+
+test("GivenRemoteEvents_WhenReplacingStoredEvents_ThenExistingPuppyEventsAreReplaced", () => {
+  const storage = createMemoryStorage({
+    [getStorageKey("2026-04-25")]: JSON.stringify([
+      createEvent("sleep", new Date("2026-04-25T22:00:00.000Z")),
+    ]),
+    [getStorageKey("2026-04-26")]: JSON.stringify([
+      createEvent("wake", new Date("2026-04-26T07:00:00.000Z")),
+    ]),
+    "other-key": "kept",
+  });
+
+  replaceStoredEvents(storage, [
+    createEvent("eat", new Date("2026-04-27T08:00:00.000Z")),
+  ]);
+
+  assert.equal(storage.getItem("other-key"), "kept");
+  assert.equal(storage.getItem(getStorageKey("2026-04-25")), null);
+  assert.equal(storage.getItem(getStorageKey("2026-04-26")), null);
+  assert.deepEqual(
+    getStoredEvents(storage).map((event) => event.type),
+    ["eat"],
   );
 });

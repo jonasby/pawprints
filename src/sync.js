@@ -85,6 +85,18 @@ export function createRemoteSync(storage, { getSettings, loadEvents, onStatusCha
         return null;
       }
     },
+    async loadSnapshot() {
+      const response = await fetch(createApiUrl("/api/sync"), { credentials: "include" });
+      if (response.status === 204 || response.status === 404) {
+        return null;
+      }
+
+      if (!response.ok) {
+        throw new Error(`PawPrints snapshot load failed with ${response.status}`);
+      }
+
+      return response.json();
+    },
     async signOut() {
       await fetch(createApiUrl("/api/auth/logout"), {
         method: "POST",

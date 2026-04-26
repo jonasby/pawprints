@@ -224,6 +224,37 @@ export function getStoredEvents(storage) {
     .sort((first, second) => new Date(second.occurredAt) - new Date(first.occurredAt));
 }
 
+export function replaceStoredEvents(storage, events) {
+  getStoredDateKeys(storage).forEach((dateKey) => {
+    storage.removeItem(getStorageKey(dateKey));
+  });
+
+  const eventsByDateKey = new Map();
+  events.forEach((event) => {
+    if (!eventsByDateKey.has(event.dateKey)) {
+      eventsByDateKey.set(event.dateKey, []);
+    }
+
+    eventsByDateKey.get(event.dateKey).push(event);
+  });
+
+  eventsByDateKey.forEach((dateEvents, dateKey) => {
+    saveEventsForDate(storage, dateKey, dateEvents);
+  });
+}
+
+export function applyStoredEventsSnapshot(storage, events = []) {
+  replaceStoredEvents(
+    storage,
+    events.map((event) => ({
+      id: event.id,
+      type: event.type,
+      occurredAt: event.occurredAt,
+      dateKey: event.dateKey,
+    })),
+  );
+}
+
 export function addEvent(storage, event) {
   const events = loadEventsForDate(storage, event.dateKey);
 

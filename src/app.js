@@ -9,6 +9,7 @@ import {
   getTodayKey,
   getTrackingDay,
   removeEvent,
+  replaceStoredEvents,
   updateEventsTime,
 } from "./events.js";
 import { createApiUrl, createRemoteSync } from "./sync.js";
@@ -38,6 +39,12 @@ function loadSettings() {
 
 function saveSettings(settings) {
   window.localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+}
+
+function applyRemoteSettings(settings, remoteSettings) {
+  settings.arrivalDate = remoteSettings.arrivalDate ?? "";
+  settings.birthDate = remoteSettings.birthDate ?? "";
+  saveSettings(settings);
 }
 
 function renderButtons(eventButtons) {
@@ -190,10 +197,6 @@ export function renderPuppyLog() {
     onStatusChange(status) {
       syncStatus.textContent = status;
     },
-    onAuthStateChange(authState) {
-      isSignedIn = authState === "signed-in";
-      renderState();
-    },
   });
 
   authUrlElements.forEach((element) => {
@@ -258,6 +261,7 @@ export function renderPuppyLog() {
   logoutForm.addEventListener("submit", (event) => {
     event.preventDefault();
     remoteSync.signOut().then(() => {
+      isSignedIn = false;
       syncStatus.textContent = "Signed out";
       renderState();
     });
@@ -367,8 +371,15 @@ export function renderPuppyLog() {
   });
 
   renderButtons(eventButtons);
-  remoteSync.getCurrentUser().then((user) => {
+  remoteSync.getCurrentUser().then(async (user) => {
     isSignedIn = Boolean(user);
+    if (isSignedIn) {
+      const snapshot = await remoteSync.loadSnapshot();
+      if (snapshot) {
+        applyRemoteSettings(settings, snapshot.settings);
+        applyStoredEventsSnapshot(window.localStorage, snapshot.events);
+      }
+    }
     renderState();
   });
   renderState();

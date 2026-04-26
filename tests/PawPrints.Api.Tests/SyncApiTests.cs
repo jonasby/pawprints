@@ -30,14 +30,19 @@ public sealed class SyncApiTests
     }
 
     [Fact]
-    public async Task GivenAnotherGoogleAccount_WhenSyncingSnapshot_ThenItIsForbidden()
+    public async Task GivenAnyGoogleAccount_WhenSyncingSnapshot_ThenUserProfileAndEventsAreStored()
     {
         await using var application = new PawPrintsApiApplication();
         using var client = application.CreateAuthenticatedClient("someone.else@gmail.com");
 
         var response = await client.PutAsJsonAsync("/api/sync", CreateSnapshot());
 
-        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+        response.EnsureSuccessStatusCode();
+        using var scope = application.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<PawPrintsDbContext>();
+        var user = await db.Users.Include(storedUser => storedUser.Events).SingleAsync();
+        Assert.Equal("someone.else@gmail.com", user.Email);
+        Assert.Equal(3, user.Events.Count);
     }
 
     [Fact]
@@ -91,6 +96,35 @@ public sealed class SyncApiTests
         var storedEvent = Assert.Single(user.Events);
         Assert.Equal("evt-food", storedEvent.ClientEventId);
         Assert.Equal("eat", storedEvent.Type);
+    }
+
+    [Fact]
+    public async Task GivenStoredSnapshot_WhenFetchingSnapshot_ThenItReturnsSettingsAndEvents()
+    {
+        await using var application = new PawPrintsApiApplication();
+        using var client = application.CreateAuthenticatedClient("jon.asby@gmail.com");
+        await client.PutAsJsonAsync("/api/sync", CreateSnapshot());
+
+        var snapshot = await client.GetFromJsonAsync<SyncSnapshotRequest>("/api/sync");
+
+        Assert.NotNull(snapshot);
+        Assert.Equal("2026-04-19", snapshot.Settings.ArrivalDate);
+        Assert.Equal("2026-02-22", snapshot.Settings.BirthDate);
+        Assert.Equal(
+            ["evt-sleep"],
+            snapshot.Events
+                .Where(storedEvent => storedEvent.DateKey == "2026-04-25")
+                .Select(storedEvent => storedEvent.Id)
+                .ToArray()
+        );
+        Assert.Equal(
+            ["evt-pee", "evt-wake"],
+            snapshot.Events
+                .Where(storedEvent => storedEvent.DateKey == "2026-04-26")
+                .Select(storedEvent => storedEvent.Id)
+                .Order()
+                .ToArray()
+        );
     }
 
     private static SyncSnapshotRequest CreateSnapshot(params SyncEventRequest[] events)

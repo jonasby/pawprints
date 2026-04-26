@@ -9,6 +9,47 @@ public sealed class SnapshotSyncService(
     ILogger<SnapshotSyncService> logger
 )
 {
+    public async Task<SyncSnapshotRequest?> GetSnapshotAsync(
+        string email,
+        CancellationToken cancellationToken
+    )
+    {
+        logger.LogInformation("Loading PawPrints snapshot for {Email}.", email);
+
+        var user = await db.Users
+            .AsNoTracking()
+            .Include(storedUser => storedUser.Events)
+            .SingleOrDefaultAsync(storedUser => storedUser.Email == email, cancellationToken);
+
+        if (user is null)
+        {
+            logger.LogInformation("No PawPrints snapshot exists yet for {Email}.", email);
+            return null;
+        }
+
+        logger.LogInformation(
+            "Loaded PawPrints snapshot for {Email}; returning {EventCount} events.",
+            email,
+            user.Events.Count
+        );
+
+        return new SyncSnapshotRequest(
+            new SyncSettingsRequest(
+                user.ArrivalDate.ToString("yyyy-MM-dd"),
+                user.BirthDate.ToString("yyyy-MM-dd")
+            ),
+            user.Events
+                .OrderBy(storedEvent => storedEvent.OccurredAt)
+                .Select(storedEvent => new SyncEventRequest(
+                    storedEvent.ClientEventId,
+                    storedEvent.Type,
+                    storedEvent.OccurredAt,
+                    storedEvent.DateKey.ToString("yyyy-MM-dd")
+                ))
+                .ToArray()
+        );
+    }
+
     public async Task SyncAsync(
         string email,
         string externalSubject,

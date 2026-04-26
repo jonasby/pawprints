@@ -227,16 +227,28 @@ h2 {
   text-transform: none;
 }
 
-.auth-actions {
-  display: flex;
-  gap: 10px;
-  align-items: center;
+.auth-bar {
+  position: absolute;
+  top: 18px;
+  right: 18px;
 }
 
-.auth-link {
+.sign-out-button {
+  border: 1px solid #fed7aa;
+  border-radius: 999px;
+  padding: 8px 12px;
   color: #9a5a20;
+  background: #fff;
+  cursor: pointer;
   font-size: 0.82rem;
   font-weight: 850;
+}
+
+.sign-out-button:hover,
+.sign-out-button:focus-visible {
+  border-color: #fb923c;
+  outline: 2px solid #fdba74;
+  outline-offset: 2px;
 }
 
 .sync-status {

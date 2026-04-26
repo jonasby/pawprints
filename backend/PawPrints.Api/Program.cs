@@ -112,10 +112,9 @@ if (googleAuthConfigured)
 builder.Services.AddAuthorization(options =>
 {
     options.AddPolicy(
-        "AllowedPawPrintsUser",
+        "AuthenticatedPawPrintsUser",
         policy => policy
             .RequireAuthenticatedUser()
-            .RequireClaim(ClaimTypes.Email, "jon.asby@gmail.com")
     );
 });
 
@@ -169,14 +168,28 @@ app.MapPost("/api/auth/logout", async (HttpContext httpContext) =>
     return Results.NoContent();
 });
 
-app.MapGet("/api/auth/me", [Authorize(Policy = "AllowedPawPrintsUser")] (ClaimsPrincipal user) =>
+app.MapGet("/api/auth/me", [Authorize(Policy = "AuthenticatedPawPrintsUser")] (ClaimsPrincipal user) =>
 {
     return Results.Ok(new { email = user.FindFirstValue(ClaimTypes.Email) });
 });
 
+app.MapGet(
+    "/api/sync",
+    [Authorize(Policy = "AuthenticatedPawPrintsUser")]
+    async (
+        CurrentUser currentUser,
+        SnapshotSyncService syncService,
+        CancellationToken cancellationToken
+    ) =>
+    {
+        var snapshot = await syncService.GetSnapshotAsync(currentUser.Email, cancellationToken);
+        return snapshot is null ? Results.NoContent() : Results.Ok(snapshot);
+    }
+);
+
 app.MapPut(
     "/api/sync",
-    [Authorize(Policy = "AllowedPawPrintsUser")]
+    [Authorize(Policy = "AuthenticatedPawPrintsUser")]
     async (
         SyncSnapshotRequest snapshot,
         CurrentUser currentUser,
