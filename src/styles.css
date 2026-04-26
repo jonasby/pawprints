@@ -98,14 +98,14 @@ h1 {
 
 .event-buttons {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(132px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(104px, 1fr));
   gap: 12px;
 }
 
 .event-button {
   display: grid;
   gap: 8px;
-  min-height: 132px;
+  min-height: 104px;
   padding: 18px 14px;
   border: 0;
   border-radius: 22px;
@@ -158,7 +158,7 @@ h1 {
 .event-list-item,
 .event-item {
   display: grid;
-  grid-template-columns: auto 1fr auto;
+  grid-template-columns: minmax(112px, auto) 1fr auto;
   align-items: center;
   gap: 12px;
   padding: 12px;
@@ -182,6 +182,65 @@ h1 {
 .event-time {
   color: #7c5a45;
   font-size: 0.92rem;
+}
+
+.event-time-control {
+  display: grid;
+}
+
+.event-time-input {
+  width: 100%;
+  min-height: 44px;
+  border: 1px solid #fed7aa;
+  border-radius: 14px;
+  padding: 8px 10px;
+  color: #3b2a20;
+  background: #fff7ed;
+  font: inherit;
+  font-weight: 800;
+}
+
+.event-time-input:focus {
+  outline: 2px solid #fb923c;
+  outline-offset: 2px;
+}
+
+.event-stack {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.event-chip {
+  display: grid;
+  width: 48px;
+  height: 48px;
+  place-items: center;
+  border: 0;
+  border-radius: 16px;
+  background: #ffedd5;
+  cursor: pointer;
+  font-size: 1.55rem;
+}
+
+.event-chip:hover,
+.event-chip:focus-visible {
+  background: #fed7aa;
+  outline: 2px solid #fb923c;
+  outline-offset: 2px;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }
 
 .event-name {
@@ -240,6 +299,16 @@ h1 {
   }
 
   .event-button {
-    min-height: 120px;
+    min-height: 96px;
+  }
+
+  .event-list-item,
+  .event-item {
+    grid-template-columns: 1fr;
+  }
+
+  .event-list-time,
+  .event-time {
+    display: none;
   }
 }

@@ -1,10 +1,11 @@
 import {
   EVENT_TYPES,
-  addEvent,
-  createEvent,
+  addEventWithDefaults,
+  formatTimeInputValue,
   getEventType,
   getEventsForDate,
   removeEvent,
+  updateEventsTime,
 } from "./events.js";
 
 const dateFormatter = new Intl.DateTimeFormat(undefined, {
@@ -30,16 +31,33 @@ function renderButtons(eventButtons) {
     button.innerHTML = `
       <span class="event-emoji" aria-hidden="true">${eventType.emoji}</span>
       <span class="event-label">${eventType.label}</span>
-      <span class="event-description">${eventType.description}</span>
     `;
 
     eventButtons.appendChild(button);
   });
 }
 
+function getEventGroups(events) {
+  const groups = new Map();
+
+  events.forEach((event) => {
+    if (!groups.has(event.occurredAt)) {
+      groups.set(event.occurredAt, []);
+    }
+
+    groups.get(event.occurredAt).push(event);
+  });
+
+  return Array.from(groups.entries()).map(([occurredAt, groupEvents]) => ({
+    occurredAt,
+    events: groupEvents,
+  }));
+}
+
 function renderEvents({ eventList, emptyState, todayLabel, countLabel }) {
   const today = new Date();
   const events = getEventsForDate(window.localStorage, today);
+  const eventGroups = getEventGroups(events);
 
   todayLabel.textContent = dateFormatter.format(today);
   countLabel.textContent =
@@ -47,28 +65,49 @@ function renderEvents({ eventList, emptyState, todayLabel, countLabel }) {
   emptyState.hidden = events.length > 0;
   eventList.replaceChildren();
 
-  events.forEach((event) => {
-    const eventType = getEventType(event.type);
-    if (!eventType) return;
+  eventGroups.forEach((eventGroup) => {
+    const knownEvents = eventGroup.events
+      .map((event) => ({ event, eventType: getEventType(event.type) }))
+      .filter(({ eventType }) => Boolean(eventType));
+
+    if (knownEvents.length === 0) return;
 
     const item = document.createElement("li");
     item.className = "event-list-item";
+    const eventIds = knownEvents.map(({ event }) => event.id).join(",");
+    const eventNames = knownEvents.map(({ eventType }) => eventType.label).join(", ");
+
     item.innerHTML = `
-      <span class="event-list-emoji" aria-hidden="true">${eventType.emoji}</span>
-      <span>
-        <span class="event-list-text">${eventType.label}</span>
-        <time class="event-list-time" datetime="${event.occurredAt}">
-          ${timeFormatter.format(new Date(event.occurredAt))}
-        </time>
+      <label class="event-time-control">
+        <span class="visually-hidden">Time for ${eventNames}</span>
+        <input
+          class="event-time-input"
+          type="time"
+          step="600"
+          value="${formatTimeInputValue(eventGroup.occurredAt)}"
+          data-event-time="${eventIds}"
+          aria-label="Adjust ${eventNames} time"
+        />
+      </label>
+      <span class="event-stack" aria-label="${eventNames}">
+        ${knownEvents
+          .map(
+            ({ event, eventType }) => `
+              <button
+                class="event-chip"
+                type="button"
+                data-remove-event="${event.id}"
+                aria-label="Remove ${eventType.label} event"
+              >
+                <span aria-hidden="true">${eventType.emoji}</span>
+              </button>
+            `,
+          )
+          .join("")}
       </span>
-      <button
-        class="delete-event"
-        type="button"
-        data-remove-event="${event.id}"
-        aria-label="Remove ${eventType.label} event"
-      >
-        Undo
-      </button>
+      <time class="event-list-time visually-hidden" datetime="${eventGroup.occurredAt}">
+        ${timeFormatter.format(new Date(eventGroup.occurredAt))}
+      </time>
     `;
 
     eventList.appendChild(item);
@@ -90,7 +129,7 @@ export function renderPuppyLog() {
     const button = event.target.closest("[data-event-type]");
     if (!button) return;
 
-    addEvent(window.localStorage, createEvent(button.dataset.eventType));
+    addEventWithDefaults(window.localStorage, button.dataset.eventType);
     renderState();
   });
 
@@ -99,6 +138,14 @@ export function renderPuppyLog() {
     if (!button) return;
 
     removeEvent(window.localStorage, button.dataset.removeEvent);
+    renderState();
+  });
+
+  eventList.addEventListener("change", (event) => {
+    const input = event.target.closest("[data-event-time]");
+    if (!input) return;
+
+    updateEventsTime(window.localStorage, input.dataset.eventTime.split(","), input.value);
     renderState();
   });
 
