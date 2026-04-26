@@ -11,7 +11,7 @@ import {
   removeEvent,
   updateEventsTime,
 } from "./events.js";
-import { createRemoteSync } from "./sync.js";
+import { createApiUrl, createRemoteSync } from "./sync.js";
 
 const dateFormatter = new Intl.DateTimeFormat(undefined, {
   month: "short",
@@ -177,8 +177,7 @@ export function renderPuppyLog() {
   const nextDayButton = document.querySelector("[data-next-day]");
   const addStatus = document.querySelector("[data-add-status]");
   const syncStatus = document.querySelector("[data-sync-status]");
-  const loginLink = document.querySelector("[data-login-link]");
-  const logoutForm = document.querySelector("[data-logout-form]");
+  const authUrlElements = document.querySelectorAll("[data-auth-url]");
   const settings = loadSettings();
   const todayKey = getTodayKey();
   const remoteSync = createRemoteSync(window.localStorage, {
@@ -189,8 +188,22 @@ export function renderPuppyLog() {
     },
   });
 
-  loginLink.href = remoteSync.createApiUrl("/api/auth/login");
-  logoutForm.action = remoteSync.createApiUrl("/api/auth/logout");
+  authUrlElements.forEach((element) => {
+    const path = element.dataset.authUrl;
+    if (!path) return;
+
+    const url = new URL(createApiUrl(path), window.location.href);
+    if (path === "/api/auth/login") {
+      url.searchParams.set("returnUrl", window.location.href);
+    }
+
+    if (element.tagName === "FORM") {
+      element.action = url.toString();
+      return;
+    }
+
+    element.href = url.toString();
+  });
 
   let selectedDateKey = todayKey;
 

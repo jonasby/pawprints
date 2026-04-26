@@ -4,12 +4,15 @@ export function getApiBaseUrl() {
   return (import.meta.env.VITE_API_BASE_URL ?? "").replace(/\/$/, "");
 }
 
-function createApiUrl(path) {
+export function createApiUrl(path) {
   return `${getApiBaseUrl()}${path}`;
 }
 
-export function getAuthUrl(path) {
-  return createApiUrl(path);
+export function createLoginUrl(returnUrl = window.location.href) {
+  const loginUrl = new URL(createApiUrl("/api/auth/login"), window.location.origin);
+  loginUrl.searchParams.set("returnUrl", returnUrl);
+
+  return loginUrl.toString();
 }
 
 export function createRemoteSync(storage, { getSettings, loadEvents, onStatusChange }) {
@@ -55,6 +58,8 @@ export function createRemoteSync(storage, { getSettings, loadEvents, onStatusCha
   }
 
   return {
+    createApiUrl,
+    createLoginUrl,
     schedule() {
       window.clearTimeout(pendingSyncId);
       pendingSyncId = window.setTimeout(() => {
