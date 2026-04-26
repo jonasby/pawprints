@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Puppy Log</title>
+    <link rel="stylesheet" href="./src/styles.css" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <section class="hero" aria-labelledby="app-title">
+        <p class="eyebrow">Today's puppy tracker</p>
+        <h1 id="app-title">Puppy Log</h1>
+        <p class="subtitle">
+          Tap an emoji when your puppy pees, poops, eats, naps, or sleeps.
+          Today's events stay in this browser for now.
+        </p>
+      </section>
+
+      <section class="card recorder" aria-labelledby="record-event-title">
+        <div class="section-heading">
+          <h2 id="record-event-title">Record an event</h2>
+          <p id="today-label" class="today-date" data-today-label></p>
+        </div>
+        <div
+          id="event-buttons"
+          class="event-buttons"
+          data-event-buttons
+          aria-label="Puppy event buttons"
+        ></div>
+      </section>
+
+      <section class="card history" aria-labelledby="today-events-title">
+        <div class="section-heading">
+          <h2 id="today-events-title">Today's events</h2>
+          <p id="event-count" class="event-count" data-count-label></p>
+        </div>
+        <ol id="event-list" class="event-list" data-event-list></ol>
+        <p id="empty-state" class="empty-state" data-empty-state>
+          No events logged yet today. Tap a button above to get started.
+        </p>
+      </section>
+    </main>
+
+    <script type="module" src="./src/main.js"></script>
+  </body>
+</html>
