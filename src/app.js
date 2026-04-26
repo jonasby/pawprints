@@ -1,23 +1,43 @@
 import {
   EVENT_TYPES,
   addEventWithDefaults,
+  formatCompactTimeValue,
   formatTimeInputValue,
+  getPuppyAgeLabel,
   getEventType,
   getEventsForDate,
+  getTodayKey,
+  getTrackingDay,
   removeEvent,
   updateEventsTime,
 } from "./events.js";
 
 const dateFormatter = new Intl.DateTimeFormat(undefined, {
-  weekday: "long",
-  month: "long",
+  month: "short",
   day: "numeric",
 });
 
-const timeFormatter = new Intl.DateTimeFormat(undefined, {
-  hour: "numeric",
-  minute: "2-digit",
-});
+const SETTINGS_KEY = "pawprints-settings";
+
+const defaultSettings = {
+  arrivalDate: getTodayKey(),
+  birthDate: "",
+};
+
+function loadSettings() {
+  try {
+    return {
+      ...defaultSettings,
+      ...JSON.parse(window.localStorage.getItem(SETTINGS_KEY)),
+    };
+  } catch {
+    return { ...defaultSettings };
+  }
+}
+
+function saveSettings(settings) {
+  window.localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+}
 
 function renderButtons(eventButtons) {
   eventButtons.replaceChildren();
@@ -37,6 +57,11 @@ function renderButtons(eventButtons) {
   });
 }
 
+function createLogDate(dateKey) {
+  const [year, month, day] = dateKey.split("-").map(Number);
+  return new Date(year, month - 1, day);
+}
+
 function getEventGroups(events) {
   const groups = new Map();
 
@@ -54,14 +79,25 @@ function getEventGroups(events) {
   }));
 }
 
-function renderEvents({ eventList, emptyState, todayLabel, countLabel }) {
-  const today = new Date();
-  const events = getEventsForDate(window.localStorage, today);
+function getLogSummary({ date, dateKey, settings, events }) {
+  const day = getTrackingDay(settings.arrivalDate, dateKey);
+  const ageLabel = getPuppyAgeLabel(settings.birthDate, dateKey);
+  const pieces = [`Day ${day}`, dateFormatter.format(date)];
+
+  if (ageLabel) {
+    pieces.push(ageLabel);
+  }
+
+  pieces.push(events.length === 1 ? "1 event" : `${events.length} events`);
+
+  return pieces.join(" · ");
+}
+
+function renderEvents({ eventList, emptyState, logSummary, date, dateKey, settings }) {
+  const events = getEventsForDate(window.localStorage, date);
   const eventGroups = getEventGroups(events);
 
-  todayLabel.textContent = dateFormatter.format(today);
-  countLabel.textContent =
-    events.length === 1 ? "1 event logged" : `${events.length} events logged`;
+  logSummary.textContent = getLogSummary({ date, dateKey, settings, events });
   emptyState.hidden = events.length > 0;
   eventList.replaceChildren();
 
@@ -75,16 +111,18 @@ function renderEvents({ eventList, emptyState, todayLabel, countLabel }) {
     const item = document.createElement("li");
     item.className = "event-list-item";
     const eventIds = knownEvents.map(({ event }) => event.id).join(",");
-    const eventNames = knownEvents.map(({ eventType }) => eventType.label).join(", ");
+    const eventNames = knownEvents.map(({ eventType }) => eventType.label).join(" + ");
 
     item.innerHTML = `
       <label class="event-time-control">
         <span class="visually-hidden">Time for ${eventNames}</span>
         <input
           class="event-time-input"
-          type="time"
-          step="600"
-          value="${formatTimeInputValue(eventGroup.occurredAt)}"
+          type="text"
+          inputmode="numeric"
+          pattern="[0-9]{4}"
+          maxlength="4"
+          value="${formatCompactTimeValue(eventGroup.occurredAt)}"
           data-event-time="${eventIds}"
           aria-label="Adjust ${eventNames} time"
         />
@@ -99,15 +137,13 @@ function renderEvents({ eventList, emptyState, todayLabel, countLabel }) {
                 data-remove-event="${event.id}"
                 aria-label="Remove ${eventType.label} event"
               >
-                <span aria-hidden="true">${eventType.emoji}</span>
+                <span class="event-chip-emoji" aria-hidden="true">${eventType.emoji}</span>
+                <span class="event-chip-label">${eventType.label}</span>
               </button>
             `,
           )
           .join("")}
       </span>
-      <time class="event-list-time visually-hidden" datetime="${eventGroup.occurredAt}">
-        ${timeFormatter.format(new Date(eventGroup.occurredAt))}
-      </time>
     `;
 
     eventList.appendChild(item);
@@ -118,18 +154,49 @@ export function renderPuppyLog() {
   const eventButtons = document.querySelector("[data-event-buttons]");
   const eventList = document.querySelector("[data-event-list]");
   const emptyState = document.querySelector("[data-empty-state]");
-  const todayLabel = document.querySelector("[data-today-label]");
-  const countLabel = document.querySelector("[data-count-label]");
+  const logDateInput = document.querySelector("[data-log-date]");
+  const arrivalDateInput = document.querySelector("[data-arrival-date]");
+  const birthDateInput = document.querySelector("[data-birth-date]");
+  const logSummary = document.querySelector("[data-log-summary]");
+  const addStatus = document.querySelector("[data-add-status]");
+  const settings = loadSettings();
+  const todayKey = getTodayKey();
+
+  let selectedDateKey = todayKey;
+
+  logDateInput.value = selectedDateKey;
+  logDateInput.max = todayKey;
+  arrivalDateInput.value = settings.arrivalDate;
+  arrivalDateInput.max = todayKey;
+  birthDateInput.value = settings.birthDate;
+  birthDateInput.max = todayKey;
 
   const renderState = () => {
-    renderEvents({ eventList, emptyState, todayLabel, countLabel });
+    const selectedDate = createLogDate(selectedDateKey);
+
+    renderEvents({
+      eventList,
+      emptyState,
+      logSummary,
+      date: selectedDate,
+      dateKey: selectedDateKey,
+      settings,
+    });
   };
 
   eventButtons.addEventListener("click", (event) => {
     const button = event.target.closest("[data-event-type]");
     if (!button) return;
 
-    addEventWithDefaults(window.localStorage, button.dataset.eventType);
+    const addedEvents = addEventWithDefaults(
+      window.localStorage,
+      button.dataset.eventType,
+      new Date(),
+      createLogDate(selectedDateKey),
+    );
+
+    addStatus.textContent =
+      addedEvents.length === 0 ? "Choose today or an earlier log day." : "";
     renderState();
   });
 
@@ -137,7 +204,7 @@ export function renderPuppyLog() {
     const button = event.target.closest("[data-remove-event]");
     if (!button) return;
 
-    removeEvent(window.localStorage, button.dataset.removeEvent);
+    removeEvent(window.localStorage, button.dataset.removeEvent, createLogDate(selectedDateKey));
     renderState();
   });
 
@@ -145,7 +212,30 @@ export function renderPuppyLog() {
     const input = event.target.closest("[data-event-time]");
     if (!input) return;
 
-    updateEventsTime(window.localStorage, input.dataset.eventTime.split(","), input.value);
+    updateEventsTime(
+      window.localStorage,
+      input.dataset.eventTime.split(","),
+      input.value,
+      createLogDate(selectedDateKey),
+    );
+    renderState();
+  });
+
+  logDateInput.addEventListener("change", () => {
+    selectedDateKey = logDateInput.value || todayKey;
+    addStatus.textContent = "";
+    renderState();
+  });
+
+  arrivalDateInput.addEventListener("change", () => {
+    settings.arrivalDate = arrivalDateInput.value || todayKey;
+    saveSettings(settings);
+    renderState();
+  });
+
+  birthDateInput.addEventListener("change", () => {
+    settings.birthDate = birthDateInput.value;
+    saveSettings(settings);
     renderState();
   });
 

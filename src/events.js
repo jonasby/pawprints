@@ -29,6 +29,52 @@ export function getStorageKey(dateKey) {
   return `${STORAGE_PREFIX}:${dateKey}`;
 }
 
+export function createLocalDate(dateKey) {
+  const [year, month, day] = dateKey.split("-").map(Number);
+
+  if (!Number.isInteger(year) || !Number.isInteger(month) || !Number.isInteger(day)) {
+    throw new Error(`Invalid date key: ${dateKey}`);
+  }
+
+  return new Date(year, month - 1, day);
+}
+
+export function getDaysBetweenDateKeys(startDateKey, endDateKey) {
+  const start = createLocalDate(startDateKey);
+  const end = createLocalDate(endDateKey);
+
+  start.setHours(12, 0, 0, 0);
+  end.setHours(12, 0, 0, 0);
+
+  return Math.round((end - start) / (24 * 60 * 60 * 1000));
+}
+
+export function getTrackingDay(arrivalDateKey, dateKey) {
+  return getDaysBetweenDateKeys(arrivalDateKey, dateKey) + 1;
+}
+
+export function getPuppyAgeLabel(birthDateKey, dateKey) {
+  if (!birthDateKey) {
+    return "";
+  }
+
+  const ageInDays = getDaysBetweenDateKeys(birthDateKey, dateKey);
+
+  if (ageInDays < 0) {
+    return "";
+  }
+
+  const weeks = Math.floor(ageInDays / 7);
+  const days = ageInDays % 7;
+  const weekLabel = weeks === 1 ? "1 week" : `${weeks} weeks`;
+
+  if (days === 0) {
+    return weekLabel;
+  }
+
+  return `${weekLabel} ${days}d`;
+}
+
 export function formatEventTime(timestamp) {
   return new Intl.DateTimeFormat(undefined, {
     hour: "numeric",
@@ -44,18 +90,65 @@ export function formatTimeInputValue(timestamp) {
   return `${hours}:${minutes}`;
 }
 
-export function roundToNearestTenMinutes(date = new Date()) {
-  return new Date(Math.round(date.getTime() / TEN_MINUTES_IN_MS) * TEN_MINUTES_IN_MS);
+export function formatCompactTimeValue(timestamp) {
+  return formatTimeInputValue(timestamp).replace(":", "");
 }
 
-export function getSuggestedEventTime(eventTypeId, events = [], now = new Date()) {
-  const latestEvent = events[0];
+export function floorToTenMinutes(date = new Date()) {
+  return new Date(Math.floor(date.getTime() / TEN_MINUTES_IN_MS) * TEN_MINUTES_IN_MS);
+}
 
-  if (latestEvent && SLEEPING_EVENT_TYPES.has(latestEvent.type)) {
-    return new Date(new Date(latestEvent.occurredAt).getTime() + ONE_HOUR_IN_MS);
+function withTimeFromDate(date, timeSource) {
+  const result = new Date(date);
+  result.setHours(timeSource.getHours(), timeSource.getMinutes(), 0, 0);
+
+  return result;
+}
+
+function getLatestEventTime(events) {
+  return events.length > 0 ? new Date(events[0].occurredAt) : null;
+}
+
+function getLatestAllowedAddTime(date, now) {
+  const dateKey = getTodayKey(date);
+  const todayKey = getTodayKey(now);
+
+  if (dateKey > todayKey) {
+    return null;
   }
 
-  return roundToNearestTenMinutes(now);
+  if (dateKey === todayKey) {
+    return floorToTenMinutes(now);
+  }
+
+  const endOfDay = new Date(date);
+  endOfDay.setHours(23, 50, 0, 0);
+
+  return endOfDay;
+}
+
+export function getSuggestedEventTime(eventTypeId, events = [], now = new Date(), date = now) {
+  const latestEvent = events[0];
+  const latestAllowedTime = getLatestAllowedAddTime(date, now);
+
+  if (!latestAllowedTime) {
+    return null;
+  }
+
+  let suggestedTime = latestAllowedTime;
+
+  if (latestEvent && SLEEPING_EVENT_TYPES.has(latestEvent.type)) {
+    suggestedTime = new Date(new Date(latestEvent.occurredAt).getTime() + ONE_HOUR_IN_MS);
+  }
+
+  const latestEventTime = getLatestEventTime(events);
+  const constrainedTime = new Date(Math.min(suggestedTime.getTime(), latestAllowedTime.getTime()));
+
+  if (latestEventTime && constrainedTime < latestEventTime) {
+    return latestEventTime <= latestAllowedTime ? latestEventTime : null;
+  }
+
+  return withTimeFromDate(date, constrainedTime);
 }
 
 function createEventId(eventTypeId, occurredAt) {
@@ -114,11 +207,16 @@ export function addEvent(storage, event) {
   return event;
 }
 
-export function addEventWithDefaults(storage, eventTypeId, now = new Date()) {
-  const dateKey = getTodayKey(now);
+export function addEventWithDefaults(storage, eventTypeId, now = new Date(), date = now) {
+  const dateKey = getTodayKey(date);
   const events = loadEventsForDate(storage, dateKey);
   const latestEvent = events[0];
-  const occurredAt = getSuggestedEventTime(eventTypeId, events, now);
+  const occurredAt = getSuggestedEventTime(eventTypeId, events, now, date);
+
+  if (!occurredAt) {
+    return [];
+  }
+
   const event = createEvent(eventTypeId, occurredAt);
   const targetEvents =
     event.dateKey === dateKey ? events : loadEventsForDate(storage, event.dateKey);
@@ -140,7 +238,11 @@ export function addEventWithDefaults(storage, eventTypeId, now = new Date()) {
 
 export function updateEventsTime(storage, eventIds, timeValue, date = new Date()) {
   const dateKey = getTodayKey(date);
-  const [hours, minutes] = timeValue.split(":").map(Number);
+  const normalizedTimeValue =
+    timeValue.length === 4 && !timeValue.includes(":")
+      ? `${timeValue.slice(0, 2)}:${timeValue.slice(2)}`
+      : timeValue;
+  const [hours, minutes] = normalizedTimeValue.split(":").map(Number);
 
   if (
     !Number.isInteger(hours) ||

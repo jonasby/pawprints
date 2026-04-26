@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 160" role="img" aria-labelledby="title">
+  <title id="title">PawPrints logo</title>
+  <rect width="160" height="160" rx="40" fill="#fff7ed" />
+  <path
+    d="M44 96c13-23 59-23 72 0 8 14-4 27-20 22-9-3-23-3-32 0-16 5-28-8-20-22Z"
+    fill="#d97706"
+  />
+  <circle cx="45" cy="56" r="15" fill="#f59e0b" />
+  <circle cx="72" cy="42" r="15" fill="#f59e0b" />
+  <circle cx="104" cy="42" r="15" fill="#f59e0b" />
+  <circle cx="129" cy="58" r="15" fill="#f59e0b" />
+  <path
+    d="M36 130c32 12 63 7 88-15"
+    fill="none"
+    stroke="#7c2d12"
+    stroke-linecap="round"
+    stroke-width="10"
+  />
+</svg>

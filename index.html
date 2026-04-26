@@ -3,23 +3,48 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Puppy Log</title>
+    <title>PawPrints</title>
+    <link rel="icon" href="./src/pawprints-icon.svg" type="image/svg+xml" />
     <link rel="stylesheet" href="./src/styles.css" />
   </head>
   <body>
     <main class="app-shell">
       <section class="hero" aria-labelledby="app-title">
-        <p class="eyebrow">Today's puppy tracker</p>
-        <h1 id="app-title">Puppy Log</h1>
-        <p class="subtitle">
-          Tap an emoji, then adjust the time if you are filling in the gaps.
-        </p>
+        <div class="brand">
+          <img class="brand-mark" src="./src/pawprints-logo.svg" alt="" />
+          <div>
+            <p class="eyebrow">Puppy tracker</p>
+            <h1 id="app-title">PawPrints</h1>
+          </div>
+        </div>
+        <p class="subtitle">Tap an event. Adjust the time inline.</p>
+      </section>
+
+      <section class="card settings" aria-labelledby="settings-title">
+        <div class="section-heading">
+          <h2 id="settings-title">Day</h2>
+          <p class="log-summary" data-log-summary></p>
+        </div>
+        <div class="settings-grid">
+          <label class="field">
+            <span>Log date</span>
+            <input type="date" data-log-date />
+          </label>
+          <label class="field">
+            <span>Arrival date</span>
+            <input type="date" data-arrival-date />
+          </label>
+          <label class="field">
+            <span>Birth date</span>
+            <input type="date" data-birth-date />
+          </label>
+        </div>
       </section>
 
       <section class="card recorder" aria-labelledby="record-event-title">
         <div class="section-heading">
-          <h2 id="record-event-title">Record an event</h2>
-          <p id="today-label" class="today-date" data-today-label></p>
+          <h2 id="record-event-title">Add event</h2>
+          <p class="add-status" data-add-status aria-live="polite"></p>
         </div>
         <div
           id="event-buttons"
@@ -31,12 +56,11 @@
 
       <section class="card history" aria-labelledby="today-events-title">
         <div class="section-heading">
-          <h2 id="today-events-title">Today's events</h2>
-          <p id="event-count" class="event-count" data-count-label></p>
+          <h2 id="today-events-title">Log</h2>
         </div>
         <ol id="event-list" class="event-list" data-event-list></ol>
         <p id="empty-state" class="empty-state" data-empty-state>
-          No events logged yet today. Tap a button above to get started.
+          No events yet for this day.
         </p>
       </section>
     </main>

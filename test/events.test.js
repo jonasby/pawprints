@@ -7,9 +7,11 @@ import {
   addEventWithDefaults,
   createEvent,
   formatTimeInputValue,
+  getPuppyAgeLabel,
   getEventsForDate,
   getStorageKey,
   getTodayKey,
+  getTrackingDay,
   loadEventsForDate,
   saveEventsForDate,
   updateEventsTime,
@@ -136,10 +138,9 @@ test("GivenANapWasThePreviousEvent_WhenAddingWake_ThenItDefaultsToOneHourLater",
   );
 });
 
-test("GivenASuggestedEventFallsOnTomorrow_WhenAddingIt_ThenItIsStoredUnderTomorrow", () => {
+test("GivenASuggestedEventWouldBeInTheFuture_WhenAddingIt_ThenItIsCappedAtNow", () => {
   const todayKey = "2026-04-26";
-  const tomorrowKey = "2026-04-27";
-  const nap = createEvent("nap", new Date("2026-04-26T23:30:00.000Z"));
+  const nap = createEvent("nap", new Date("2026-04-26T22:50:00.000Z"));
   const storage = createMemoryStorage({
     [getStorageKey(todayKey)]: JSON.stringify([nap]),
   });
@@ -147,12 +148,11 @@ test("GivenASuggestedEventFallsOnTomorrow_WhenAddingIt_ThenItIsStoredUnderTomorr
   addEventWithDefaults(storage, "wake", new Date("2026-04-26T23:40:00.000Z"));
 
   assert.deepEqual(
-    loadEventsForDate(storage, todayKey).map((event) => event.type),
-    ["nap"],
-  );
-  assert.deepEqual(
-    loadEventsForDate(storage, tomorrowKey).map((event) => event.type),
-    ["wake"],
+    loadEventsForDate(storage, todayKey).map((event) => [event.type, event.occurredAt]),
+    [
+      ["wake", "2026-04-26T23:40:00.000Z"],
+      ["nap", "2026-04-26T22:50:00.000Z"],
+    ],
   );
 });
 
@@ -197,4 +197,57 @@ test("GivenEventsAtTheSameTimestamp_WhenUpdatingTheirTime_ThenTheyMoveTogether",
       ["pee", "07:20"],
     ],
   );
+});
+
+test("GivenACompactTimeValue_WhenUpdatingEventTime_ThenItIsAccepted", () => {
+  const date = new Date("2026-04-26T12:00:00");
+  const dateKey = "2026-04-26";
+  const pee = createEvent("pee", new Date("2026-04-26T07:00:00.000Z"));
+  const storage = createMemoryStorage({
+    [getStorageKey(dateKey)]: JSON.stringify([pee]),
+  });
+
+  updateEventsTime(storage, [pee.id], "0830", date);
+
+  assert.equal(formatTimeInputValue(loadEventsForDate(storage, dateKey)[0].occurredAt), "08:30");
+});
+
+test("GivenAFutureLogDate_WhenAddingAnEvent_ThenNoEventIsStored", () => {
+  const storage = createMemoryStorage();
+
+  const addedEvents = addEventWithDefaults(
+    storage,
+    "pee",
+    new Date("2026-04-26T12:00:00.000Z"),
+    new Date("2026-04-27T00:00:00.000Z"),
+  );
+
+  assert.deepEqual(addedEvents, []);
+  assert.deepEqual(loadEventsForDate(storage, "2026-04-27"), []);
+});
+
+test("GivenLatestEventIsAfterNow_WhenAddingAnEvent_ThenNoEarlierEventIsStored", () => {
+  const dateKey = "2026-04-26";
+  const futureEvent = createEvent("pee", new Date("2026-04-26T12:10:00.000Z"));
+  const storage = createMemoryStorage({
+    [getStorageKey(dateKey)]: JSON.stringify([futureEvent]),
+  });
+
+  const addedEvents = addEventWithDefaults(
+    storage,
+    "poop",
+    new Date("2026-04-26T12:00:00.000Z"),
+    new Date("2026-04-26T00:00:00.000Z"),
+  );
+
+  assert.deepEqual(addedEvents, []);
+  assert.deepEqual(
+    loadEventsForDate(storage, dateKey).map((event) => event.type),
+    ["pee"],
+  );
+});
+
+test("GivenArrivalAndBirthDates_WhenCalculatingDayAndAge_ThenTheyUseTheLogDate", () => {
+  assert.equal(getTrackingDay("2026-04-19", "2026-04-26"), 8);
+  assert.equal(getPuppyAgeLabel("2026-02-22", "2026-04-26"), "9 weeks");
 });
