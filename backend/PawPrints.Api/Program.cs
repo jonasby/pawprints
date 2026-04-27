@@ -10,6 +10,7 @@ using PawPrints.Api.Data;
 using PawPrints.Api.Sync;
 
 var builder = WebApplication.CreateBuilder(args);
+var isDevelopment = builder.Environment.IsDevelopment();
 
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
@@ -21,7 +22,7 @@ builder.Services.AddCors(options =>
     options.AddPolicy("Frontend", policy =>
     {
         var allowedOrigins = builder.Configuration.GetSection("AllowedOrigins").Get<string[]>()
-            ?? ["http://localhost:5173"];
+            ?? ["http://localhost:5173", "https://localhost:5173"];
         policy.WithOrigins(allowedOrigins)
             .AllowAnyHeader()
             .AllowAnyMethod()
@@ -31,14 +32,21 @@ builder.Services.AddCors(options =>
 
 builder.Services.AddDbContext<PawPrintsDbContext>(options =>
 {
-    var connectionString = builder.Configuration.GetConnectionString("PawPrintsDb");
+    var configuredConnectionString = builder.Configuration.GetConnectionString("PawPrintsDb");
+    var useSqliteFallback = ProgramConfiguration.ShouldUseSqliteForDevelopment(
+        configuredConnectionString,
+        isDevelopment
+    );
+    var connectionString = useSqliteFallback ? null : configuredConnectionString;
 
     if (string.IsNullOrWhiteSpace(connectionString))
     {
+        Console.WriteLine("Using local SQLite database for PawPrints API.");
         options.UseSqlite("Data Source=pawprints-local.db");
         return;
     }
 
+    Console.WriteLine("Using configured SQL Server database for PawPrints API.");
     options.UseSqlServer(connectionString);
 });
 
@@ -70,9 +78,13 @@ var authentication = builder.Services
     })
     .AddCookie(options =>
     {
-        options.Cookie.Name = "__Host-PawPrints";
-        options.Cookie.SameSite = SameSiteMode.None;
-        options.Cookie.SecurePolicy = CookieSecurePolicy.Always;
+        // Local HTTP development cannot use __Host- prefixed secure-only cookies.
+        // Production keeps stricter cookie settings.
+        options.Cookie.Name = isDevelopment ? "PawPrints.Dev" : "__Host-PawPrints";
+        options.Cookie.SameSite = isDevelopment ? SameSiteMode.Lax : SameSiteMode.None;
+        options.Cookie.SecurePolicy = isDevelopment
+            ? CookieSecurePolicy.SameAsRequest
+            : CookieSecurePolicy.Always;
         options.LoginPath = "/api/auth/login";
         options.LogoutPath = "/api/auth/logout";
         options.Events.OnRedirectToLogin = context =>
@@ -123,12 +135,28 @@ var app = builder.Build();
 using (var scope = app.Services.CreateScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<PawPrintsDbContext>();
-    if (app.Environment.IsEnvironment("Testing"))
+    var useEnsureCreated = app.Environment.IsEnvironment("Testing")
+        || ProgramConfiguration.ShouldUseEnsureCreated(db.Database.ProviderName);
+    if (useEnsureCreated)
     {
+        Console.WriteLine($"Initializing database with EnsureCreated for provider '{db.Database.ProviderName}'.");
+        if (ProgramConfiguration.ShouldUseEnsureCreated(db.Database.ProviderName))
+        {
+            var existingTables = await ProgramConfiguration.GetSqliteTableNamesAsync(
+                db.Database.GetDbConnection(),
+                CancellationToken.None
+            );
+            if (ProgramConfiguration.ShouldRecreateSqliteSchema(existingTables))
+            {
+                Console.WriteLine("Detected incomplete SQLite schema. Recreating local database.");
+                await db.Database.EnsureDeletedAsync();
+            }
+        }
         await db.Database.EnsureCreatedAsync();
     }
     else
     {
+        Console.WriteLine($"Applying migrations for provider '{db.Database.ProviderName}'.");
         await db.Database.MigrateAsync();
     }
 }
@@ -139,6 +167,7 @@ if (app.Environment.IsDevelopment())
     app.UseSwaggerUI();
 }
 
+app.UseHttpsRedirection();
 app.UseCors("Frontend");
 app.UseAuthentication();
 app.UseAuthorization();
@@ -206,12 +235,67 @@ app.Run();
 
 public partial class Program;
 
-static partial class ProgramConfiguration
+public static partial class ProgramConfiguration
 {
     public static string? GetFirstConfiguredValue(IConfiguration configuration, params string[] keys)
     {
         return keys
             .Select(key => configuration[key])
             .FirstOrDefault(value => !string.IsNullOrWhiteSpace(value));
+    }
+
+    public static bool ShouldUseSqliteForDevelopment(string? connectionString, bool isDevelopment)
+    {
+        return isDevelopment
+            && !string.IsNullOrWhiteSpace(connectionString)
+            && connectionString.Contains(
+                "Authentication=Active Directory Managed Identity",
+                StringComparison.OrdinalIgnoreCase
+            );
+    }
+
+    public static bool ShouldUseEnsureCreated(string? providerName)
+    {
+        return string.Equals(
+            providerName,
+            "Microsoft.EntityFrameworkCore.Sqlite",
+            StringComparison.Ordinal
+        );
+    }
+
+    public static bool ShouldRecreateSqliteSchema(IEnumerable<string> existingTables)
+    {
+        var tableNames = existingTables.ToHashSet(StringComparer.OrdinalIgnoreCase);
+        return !tableNames.Contains("Users") || !tableNames.Contains("Events");
+    }
+
+    public static async Task<IReadOnlyList<string>> GetSqliteTableNamesAsync(
+        System.Data.Common.DbConnection connection,
+        CancellationToken cancellationToken
+    )
+    {
+        var shouldCloseConnection = connection.State != System.Data.ConnectionState.Open;
+        if (shouldCloseConnection)
+        {
+            await connection.OpenAsync(cancellationToken);
+        }
+
+        await using var command = connection.CreateCommand();
+        command.CommandText =
+            "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%';";
+
+        var tableNames = new List<string>();
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            tableNames.Add(reader.GetString(0));
+        }
+
+        if (shouldCloseConnection)
+        {
+            await connection.CloseAsync();
+        }
+
+        return tableNames;
     }
 }
