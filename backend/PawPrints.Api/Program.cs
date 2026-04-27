@@ -8,68 +8,86 @@ using PawPrints.Api;
 using PawPrints.Api.Contracts;
 using PawPrints.Api.Data;
 using PawPrints.Api.Invites;
+using PawPrints.Api.Middleware;
 using PawPrints.Api.Sync;
+using Serilog;
+using Serilog.Formatting.Compact;
 
-var builder = WebApplication.CreateBuilder(args);
-var isDevelopment = builder.Environment.IsDevelopment();
+Log.Logger = new LoggerConfiguration()
+    .MinimumLevel.Information()
+    .WriteTo.Console(new CompactJsonFormatter())
+    .CreateBootstrapLogger();
 
-builder.Services.AddEndpointsApiExplorer();
-builder.Services.AddSwaggerGen();
-builder.Services.AddHttpContextAccessor();
-builder.Services.AddScoped<CurrentUser>();
-builder.Services.AddScoped<SnapshotSyncService>();
-builder.Services.AddScoped<InviteService>();
-builder.Services.AddCors(options =>
+try
 {
-    options.AddPolicy("Frontend", policy =>
+    Log.Information("Starting PawPrints API");
+
+    var builder = WebApplication.CreateBuilder(args);
+    builder.Host.UseSerilog(
+        (context, services, configuration) =>
+            configuration
+                .ReadFrom.Configuration(context.Configuration)
+                .ReadFrom.Services(services)
+                .Enrich.FromLogContext()
+                .WriteTo.Console(new CompactJsonFormatter()));
+
+    var isDevelopment = builder.Environment.IsDevelopment();
+
+    builder.Services.AddEndpointsApiExplorer();
+    builder.Services.AddSwaggerGen();
+    builder.Services.AddHttpContextAccessor();
+    builder.Services.AddScoped<CurrentUser>();
+    builder.Services.AddScoped<SnapshotSyncService>();
+    builder.Services.AddScoped<InviteService>();
+    builder.Services.AddCors(options =>
     {
-        var allowedOrigins = builder.Configuration.GetSection("AllowedOrigins").Get<string[]>()
-            ?? ["http://localhost:5173", "https://localhost:5173"];
-        policy.WithOrigins(allowedOrigins)
-            .AllowAnyHeader()
-            .AllowAnyMethod()
-            .AllowCredentials();
+        options.AddPolicy("Frontend", policy =>
+        {
+            var allowedOrigins = builder.Configuration.GetSection("AllowedOrigins").Get<string[]>()
+                ?? ["http://localhost:5173", "https://localhost:5173"];
+            policy.WithOrigins(allowedOrigins)
+                .AllowAnyHeader()
+                .AllowAnyMethod()
+                .AllowCredentials();
+        });
     });
-});
 
-builder.Services.AddDbContext<PawPrintsDbContext>(options =>
-{
-    var configuredConnectionString = builder.Configuration.GetConnectionString("PawPrintsDb");
-    var useSqliteFallback = ProgramConfiguration.ShouldUseSqliteForDevelopment(
-        configuredConnectionString,
-        isDevelopment
-    );
-    var connectionString = useSqliteFallback ? null : configuredConnectionString;
-
-    if (string.IsNullOrWhiteSpace(connectionString))
+    builder.Services.AddDbContext<PawPrintsDbContext>(options =>
     {
-        Console.WriteLine("Using local SQLite database for PawPrints API.");
-        options.UseSqlite("Data Source=pawprints-local.db");
-        return;
-    }
+        var configuredConnectionString = builder.Configuration.GetConnectionString("PawPrintsDb");
+        var useSqliteFallback = ProgramConfiguration.ShouldUseSqliteForDevelopment(
+            configuredConnectionString,
+            isDevelopment
+        );
+        var connectionString = useSqliteFallback ? null : configuredConnectionString;
 
-    Console.WriteLine("Using configured SQL Server database for PawPrints API.");
-    options.UseSqlServer(connectionString);
-});
+        if (string.IsNullOrWhiteSpace(connectionString))
+        {
+            options.UseSqlite("Data Source=pawprints-local.db");
+            return;
+        }
 
-var googleClientId = ProgramConfiguration.GetFirstConfiguredValue(
-    builder.Configuration,
-    "Authentication:Google:ClientId",
-    "Google:ClientId",
-    "GOOGLE_CLIENT_ID",
-    "GOOGLE_OAUTH_CLIENT_ID"
-);
-var googleClientSecret = ProgramConfiguration.GetFirstConfiguredValue(
-    builder.Configuration,
-    "Authentication:Google:ClientSecret",
-    "Google:ClientSecret",
-    "GOOGLE_CLIENT_SECRET",
-    "GOOGLE_OAUTH_CLIENT_SECRET"
-);
-var googleAuthConfigured = !string.IsNullOrWhiteSpace(googleClientId)
-    && !string.IsNullOrWhiteSpace(googleClientSecret);
+        options.UseSqlServer(connectionString);
+    });
 
-var authentication = builder.Services
+    var googleClientId = ProgramConfiguration.GetFirstConfiguredValue(
+        builder.Configuration,
+        "Authentication:Google:ClientId",
+        "Google:ClientId",
+        "GOOGLE_CLIENT_ID",
+        "GOOGLE_OAUTH_CLIENT_ID"
+    );
+    var googleClientSecret = ProgramConfiguration.GetFirstConfiguredValue(
+        builder.Configuration,
+        "Authentication:Google:ClientSecret",
+        "Google:ClientSecret",
+        "GOOGLE_CLIENT_SECRET",
+        "GOOGLE_OAUTH_CLIENT_SECRET"
+    );
+    var googleAuthConfigured = !string.IsNullOrWhiteSpace(googleClientId)
+        && !string.IsNullOrWhiteSpace(googleClientSecret);
+
+    var authentication = builder.Services
     .AddAuthentication(options =>
     {
         options.DefaultAuthenticateScheme = CookieAuthenticationDefaults.AuthenticationScheme;
@@ -114,109 +132,139 @@ var authentication = builder.Services
         };
     });
 
-if (googleAuthConfigured)
-{
-    authentication.AddGoogle(options =>
+    if (googleAuthConfigured)
     {
-        options.ClientId = googleClientId!;
-        options.ClientSecret = googleClientSecret!;
-        options.CallbackPath = "/api/auth/google-callback";
-    });
-}
-
-builder.Services.AddAuthorization(options =>
-{
-    options.AddPolicy(
-        "AuthenticatedPawPrintsUser",
-        policy => policy
-            .RequireAuthenticatedUser()
-    );
-});
-
-var app = builder.Build();
-
-using (var scope = app.Services.CreateScope())
-{
-    var db = scope.ServiceProvider.GetRequiredService<PawPrintsDbContext>();
-    var useEnsureCreated = app.Environment.IsEnvironment("Testing")
-        || ProgramConfiguration.ShouldUseEnsureCreated(db.Database.ProviderName);
-    if (useEnsureCreated)
-    {
-        Console.WriteLine($"Initializing database with EnsureCreated for provider '{db.Database.ProviderName}'.");
-        if (ProgramConfiguration.ShouldUseEnsureCreated(db.Database.ProviderName))
+        authentication.AddGoogle(options =>
         {
-            var existingTables = await ProgramConfiguration.GetSqliteTableNamesAsync(
-                db.Database.GetDbConnection(),
-                CancellationToken.None
-            );
-            if (ProgramConfiguration.ShouldRecreateSqliteSchema(existingTables))
-            {
-                Console.WriteLine("Detected incomplete SQLite schema. Recreating local database.");
-                await db.Database.EnsureDeletedAsync();
-            }
-        }
-        await db.Database.EnsureCreatedAsync();
+            options.ClientId = googleClientId!;
+            options.ClientSecret = googleClientSecret!;
+            options.CallbackPath = "/api/auth/google-callback";
+        });
     }
-    else
+
+    builder.Services.AddAuthorization(options =>
     {
-        Console.WriteLine($"Applying migrations for provider '{db.Database.ProviderName}'.");
-        await db.Database.MigrateAsync();
-    }
-}
-
-if (app.Environment.IsDevelopment())
-{
-    app.UseSwagger();
-    app.UseSwaggerUI();
-}
-
-app.UseHttpsRedirection();
-app.UseCors("Frontend");
-app.UseAuthentication();
-app.UseAuthorization();
-
-app.MapGet("/api/auth/login", (string? returnUrl) =>
-{
-    if (!googleAuthConfigured)
-    {
-        return Results.Problem(
-            title: "Google sign-in is not configured.",
-            detail: "Set Authentication__Google__ClientId and Authentication__Google__ClientSecret on the API App Service.",
-            statusCode: StatusCodes.Status503ServiceUnavailable
+        options.AddPolicy(
+            "AuthenticatedPawPrintsUser",
+            policy => policy
+                .RequireAuthenticatedUser()
         );
+    });
+
+    var app = builder.Build();
+
+    using (var scope = app.Services.CreateScope())
+    {
+        var startupLogger = scope.ServiceProvider.GetRequiredService<ILoggerFactory>().CreateLogger("Startup");
+        var db = scope.ServiceProvider.GetRequiredService<PawPrintsDbContext>();
+        var useEnsureCreated = app.Environment.IsEnvironment("Testing")
+            || ProgramConfiguration.ShouldUseEnsureCreated(db.Database.ProviderName);
+        if (useEnsureCreated)
+        {
+            startupLogger.LogInformation(
+                "Initializing database with EnsureCreated for provider {DatabaseProvider}",
+                db.Database.ProviderName ?? "unknown"
+            );
+            if (ProgramConfiguration.ShouldUseEnsureCreated(db.Database.ProviderName))
+            {
+                var existingTables = await ProgramConfiguration.GetSqliteTableNamesAsync(
+                    db.Database.GetDbConnection(),
+                    CancellationToken.None
+                );
+                if (ProgramConfiguration.ShouldRecreateSqliteSchema(existingTables))
+                {
+                    startupLogger.LogInformation("Detected incomplete SQLite schema; recreating local database");
+                    await db.Database.EnsureDeletedAsync();
+                }
+            }
+            await db.Database.EnsureCreatedAsync();
+        }
+        else
+        {
+            startupLogger.LogInformation(
+                "Applying migrations for provider {DatabaseProvider}",
+                db.Database.ProviderName ?? "unknown"
+            );
+            await db.Database.MigrateAsync();
+        }
     }
 
-    var properties = new AuthenticationProperties
+    if (app.Environment.IsDevelopment())
     {
-        RedirectUri = string.IsNullOrWhiteSpace(returnUrl) ? "/" : returnUrl,
-    };
+        app.UseSwagger();
+        app.UseSwaggerUI();
+    }
 
-    return Results.Challenge(properties, [GoogleDefaults.AuthenticationScheme]);
-});
+    app.UseMiddleware<UnhandledExceptionLoggingMiddleware>();
 
-app.MapPost("/api/auth/logout", async (HttpContext httpContext) =>
-{
-    await httpContext.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
-    return Results.NoContent();
-});
+    app.UseHttpsRedirection();
+    app.UseCors("Frontend");
+    app.UseAuthentication();
+    app.UseAuthorization();
 
-app.MapGet(
+    app.MapGet("/api/auth/login", (string? returnUrl) =>
+    {
+        if (!googleAuthConfigured)
+        {
+            return Results.Problem(
+                title: "Google sign-in is not configured.",
+                detail: "Set Authentication__Google__ClientId and Authentication__Google__ClientSecret on the API App Service.",
+                statusCode: StatusCodes.Status503ServiceUnavailable
+            );
+        }
+
+        var properties = new AuthenticationProperties
+        {
+            RedirectUri = string.IsNullOrWhiteSpace(returnUrl) ? "/" : returnUrl,
+        };
+
+        return Results.Challenge(properties, [GoogleDefaults.AuthenticationScheme]);
+    });
+
+    app.MapPost("/api/auth/logout", async (HttpContext httpContext) =>
+    {
+        await httpContext.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
+        return Results.NoContent();
+    });
+
+    app.MapGet(
     "/api/auth/me",
     [Authorize(Policy = "AuthenticatedPawPrintsUser")]
     async (
         ClaimsPrincipal user,
         PawPrintsDbContext dbContext,
+        ILoggerFactory loggerFactory,
         CancellationToken cancellationToken
     ) =>
     {
+        var meLogger = loggerFactory.CreateLogger("PawPrints.Auth");
         var email = user.FindFirstValue(ClaimTypes.Email)!;
         var storedUser = await dbContext.Users.AsNoTracking().SingleOrDefaultAsync(
             candidate => candidate.Email == email,
             cancellationToken
         );
 
-        if (storedUser is null || storedUser.CollaboratesWithUserId is null)
+        if (storedUser is null)
         {
+            meLogger.LogInformation(
+                "Current user profile load completed with outcome {Outcome} email {Email} collaboration role {CollaborationRole} owner profile email {OwnerProfileEmail}",
+                "NotPersistedYet",
+                email,
+                "owner",
+                null
+            );
+            return Results.Ok(new MeResponse(email, new CollaborationInfo("owner", null)));
+        }
+
+        if (storedUser.CollaboratesWithUserId is null)
+        {
+            meLogger.LogInformation(
+                "Current user profile load completed with outcome {Outcome} email {Email} collaboration role {CollaborationRole} owner profile email {OwnerProfileEmail}",
+                "Owner",
+                email,
+                "owner",
+                null
+            );
             return Results.Ok(new MeResponse(email, new CollaborationInfo("owner", null)));
         }
 
@@ -225,11 +273,19 @@ app.MapGet(
             cancellationToken
         );
 
+        meLogger.LogInformation(
+            "Current user profile load completed with outcome {Outcome} email {Email} collaboration role {CollaborationRole} owner profile email {OwnerProfileEmail}",
+            "Collaborator",
+            email,
+            "collaborator",
+            owner?.Email
+        );
+
         return Results.Ok(new MeResponse(email, new CollaborationInfo("collaborator", owner?.Email)));
     }
-);
+    );
 
-app.MapPost(
+    app.MapPost(
     "/api/invites",
     [Authorize(Policy = "AuthenticatedPawPrintsUser")]
     async (
@@ -261,9 +317,9 @@ app.MapPost(
             );
         }
     }
-);
+    );
 
-app.MapPost(
+    app.MapPost(
     "/api/invites/{token}/accept",
     [Authorize(Policy = "AuthenticatedPawPrintsUser")]
     async (
@@ -287,9 +343,9 @@ app.MapPost(
 
         return Results.NoContent();
     }
-);
+    );
 
-app.MapGet(
+    app.MapGet(
     "/api/sync",
     [Authorize(Policy = "AuthenticatedPawPrintsUser")]
     async (
@@ -301,9 +357,9 @@ app.MapGet(
         var snapshot = await syncService.GetSnapshotAsync(currentUser.Email, cancellationToken);
         return snapshot is null ? Results.NoContent() : Results.Ok(snapshot);
     }
-);
+    );
 
-app.MapPut(
+    app.MapPut(
     "/api/sync",
     [Authorize(Policy = "AuthenticatedPawPrintsUser")]
     async (
@@ -316,9 +372,19 @@ app.MapPut(
         await syncService.SyncAsync(currentUser.Email, currentUser.Subject, snapshot, cancellationToken);
         return Results.NoContent();
     }
-);
+    );
 
-app.Run();
+    app.Run();
+}
+catch (Exception fatal)
+{
+    Log.Fatal(fatal, "Application terminated unexpectedly");
+    throw;
+}
+finally
+{
+    Log.CloseAndFlush();
+}
 
 public partial class Program;
 
