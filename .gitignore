@@ -49,6 +49,12 @@ node_modules/
 *~
 CodeCoverage/
 
+# IDE (optional local Cursor/VS Code settings)
+.vscode/
+
+# Local SQLite created by PawPrints API in Development
+**/pawprints-local.db*
+
 # MSBuild Binary and Structured Log
 *.binlog
 
