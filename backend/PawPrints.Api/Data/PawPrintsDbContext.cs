@@ -8,6 +8,8 @@ public sealed class PawPrintsDbContext(DbContextOptions<PawPrintsDbContext> opti
 
     public DbSet<PuppyEvent> Events => Set<PuppyEvent>();
 
+    public DbSet<PawPrintsInvite> Invites => Set<PawPrintsInvite>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         modelBuilder.Entity<PawPrintsUser>(user =>
@@ -20,6 +22,27 @@ public sealed class PawPrintsDbContext(DbContextOptions<PawPrintsDbContext> opti
                 .WithOne(storedEvent => storedEvent.User)
                 .HasForeignKey(storedEvent => storedEvent.UserId)
                 .OnDelete(DeleteBehavior.Cascade);
+            user.HasOne(storedUser => storedUser.CollaboratesWith)
+                .WithMany(owner => owner.Collaborators)
+                .HasForeignKey(storedUser => storedUser.CollaboratesWithUserId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<PawPrintsInvite>(invite =>
+        {
+            invite.HasKey(storedInvite => storedInvite.Id);
+            invite.HasIndex(storedInvite => storedInvite.TokenHash).IsUnique();
+            invite.Property(storedInvite => storedInvite.TokenHash).HasMaxLength(64).IsRequired();
+            invite
+                .HasOne(storedInvite => storedInvite.Owner)
+                .WithMany()
+                .HasForeignKey(storedInvite => storedInvite.OwnerUserId)
+                .OnDelete(DeleteBehavior.Cascade);
+            invite
+                .HasOne(storedInvite => storedInvite.ConsumedBy)
+                .WithMany()
+                .HasForeignKey(storedInvite => storedInvite.ConsumedByUserId)
+                .OnDelete(DeleteBehavior.Restrict);
         });
 
         modelBuilder.Entity<PuppyEvent>(puppyEvent =>

@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using PawPrints.Api.Data;
 
@@ -10,9 +11,11 @@ using PawPrints.Api.Data;
 namespace PawPrints.Api.Data.Migrations
 {
     [DbContext(typeof(PawPrintsDbContext))]
-    partial class PawPrintsDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260427185348_AddCollaborationInvites")]
+    partial class AddCollaborationInvites
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder.HasAnnotation("ProductVersion", "8.0.26");

@@ -16,5 +16,11 @@ public sealed class PawPrintsUser
 
     public DateTimeOffset UpdatedAt { get; set; }
 
+    public long? CollaboratesWithUserId { get; set; }
+
+    public PawPrintsUser? CollaboratesWith { get; set; }
+
     public List<PuppyEvent> Events { get; set; } = [];
+
+    public List<PawPrintsUser> Collaborators { get; set; } = [];
 }

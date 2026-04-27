@@ -7,6 +7,7 @@ using Microsoft.EntityFrameworkCore;
 using PawPrints.Api;
 using PawPrints.Api.Contracts;
 using PawPrints.Api.Data;
+using PawPrints.Api.Invites;
 using PawPrints.Api.Sync;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -17,6 +18,7 @@ builder.Services.AddSwaggerGen();
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<CurrentUser>();
 builder.Services.AddScoped<SnapshotSyncService>();
+builder.Services.AddScoped<InviteService>();
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("Frontend", policy =>
@@ -198,10 +200,94 @@ app.MapPost("/api/auth/logout", async (HttpContext httpContext) =>
     return Results.NoContent();
 });
 
-app.MapGet("/api/auth/me", [Authorize(Policy = "AuthenticatedPawPrintsUser")] (ClaimsPrincipal user) =>
-{
-    return Results.Ok(new { email = user.FindFirstValue(ClaimTypes.Email) });
-});
+app.MapGet(
+    "/api/auth/me",
+    [Authorize(Policy = "AuthenticatedPawPrintsUser")]
+    async (
+        ClaimsPrincipal user,
+        PawPrintsDbContext dbContext,
+        CancellationToken cancellationToken
+    ) =>
+    {
+        var email = user.FindFirstValue(ClaimTypes.Email)!;
+        var storedUser = await dbContext.Users.AsNoTracking().SingleOrDefaultAsync(
+            candidate => candidate.Email == email,
+            cancellationToken
+        );
+
+        if (storedUser is null || storedUser.CollaboratesWithUserId is null)
+        {
+            return Results.Ok(new MeResponse(email, new CollaborationInfo("owner", null)));
+        }
+
+        var owner = await dbContext.Users.AsNoTracking().SingleOrDefaultAsync(
+            candidate => candidate.Id == storedUser.CollaboratesWithUserId,
+            cancellationToken
+        );
+
+        return Results.Ok(new MeResponse(email, new CollaborationInfo("collaborator", owner?.Email)));
+    }
+);
+
+app.MapPost(
+    "/api/invites",
+    [Authorize(Policy = "AuthenticatedPawPrintsUser")]
+    async (
+        CurrentUser currentUser,
+        InviteService inviteService,
+        CancellationToken cancellationToken
+    ) =>
+    {
+        try
+        {
+            var created = await inviteService.CreateInviteAsync(currentUser.Email, cancellationToken);
+            if (created is null)
+            {
+                return Results.Problem(
+                    title: "Profile not found.",
+                    detail: "Save your puppy log once before sharing it.",
+                    statusCode: StatusCodes.Status404NotFound
+                );
+            }
+
+            return Results.Created("/api/invites", created);
+        }
+        catch (InvalidOperationException exception)
+        {
+            return Results.Problem(
+                title: "Cannot create invite.",
+                detail: exception.Message,
+                statusCode: StatusCodes.Status403Forbidden
+            );
+        }
+    }
+);
+
+app.MapPost(
+    "/api/invites/{token}/accept",
+    [Authorize(Policy = "AuthenticatedPawPrintsUser")]
+    async (
+        string token,
+        CurrentUser currentUser,
+        InviteService inviteService,
+        CancellationToken cancellationToken
+    ) =>
+    {
+        var outcome = await inviteService.AcceptInviteAsync(
+            token,
+            currentUser.Email,
+            currentUser.Subject,
+            cancellationToken
+        );
+
+        if (!outcome.Success)
+        {
+            return Results.Problem(title: "Invite cannot be accepted.", detail: outcome.Error, statusCode: outcome.StatusCode);
+        }
+
+        return Results.NoContent();
+    }
+);
 
 app.MapGet(
     "/api/sync",
@@ -267,7 +353,9 @@ public static partial class ProgramConfiguration
     public static bool ShouldRecreateSqliteSchema(IEnumerable<string> existingTables)
     {
         var tableNames = existingTables.ToHashSet(StringComparer.OrdinalIgnoreCase);
-        return !tableNames.Contains("Users") || !tableNames.Contains("Events");
+        return !tableNames.Contains("Users")
+            || !tableNames.Contains("Events")
+            || !tableNames.Contains("Invites");
     }
 
     public static async Task<IReadOnlyList<string>> GetSqliteTableNamesAsync(

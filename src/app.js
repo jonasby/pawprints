@@ -42,6 +42,29 @@ function saveSettings(settings) {
   window.localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
 }
 
+function readInviteTokenFromLocation() {
+  try {
+    return new URLSearchParams(window.location.search).get("invite");
+  } catch {
+    return null;
+  }
+}
+
+function stripInviteQueryParam() {
+  try {
+    const url = new URL(window.location.href);
+    if (!url.searchParams.has("invite")) {
+      return;
+    }
+
+    url.searchParams.delete("invite");
+    const search = url.searchParams.toString();
+    window.history.replaceState({}, "", `${url.pathname}${search ? `?${search}` : ""}${url.hash}`);
+  } catch {
+    // ignore malformed URLs
+  }
+}
+
 function applyRemoteSettings(settings, remoteSettings) {
   settings.arrivalDate = remoteSettings.arrivalDate ?? "";
   settings.birthDate = remoteSettings.birthDate ?? "";
@@ -217,11 +240,21 @@ export function renderPuppyLog() {
   const bootRetryButton = document.querySelector("[data-boot-retry]");
   const authUrlElements = document.querySelectorAll("[data-auth-url]");
   const logoutForm = document.querySelector("[data-auth-url='/api/auth/logout']");
+  const shareCollaboratorNote = document.querySelector("[data-share-collaborator]");
+  const shareOwnerTools = document.querySelector("[data-share-owner]");
+  const createInviteButton = document.querySelector("[data-create-invite]");
+  const shareInviteBlock = document.querySelector("[data-share-invite-block]");
+  const inviteUrlInput = document.querySelector("[data-invite-url]");
+  const inviteExpiryLabel = document.querySelector("[data-invite-expiry]");
+  const whatsappInviteLink = document.querySelector("[data-whatsapp-invite]");
+  const copyInviteButton = document.querySelector("[data-copy-invite]");
+  const shareStatus = document.querySelector("[data-share-status]");
   const settings = loadSettings();
   const todayKey = getTodayKey();
   let isSignedIn = false;
   let isBootstrapping = false;
   let bootstrapError = null;
+  let accountProfile = null;
   const remoteSync = createRemoteSync(window.localStorage, {
     getSettings: () => settings,
     loadEvents: getStoredEvents,
@@ -289,6 +322,21 @@ export function renderPuppyLog() {
     activitySections.forEach((section) => {
       section.toggleAttribute("hidden", !isSetupComplete);
     });
+
+    const collaborationRole = accountProfile?.collaboration?.role ?? "owner";
+    if (shareCollaboratorNote && shareOwnerTools) {
+      if (collaborationRole === "collaborator") {
+        shareCollaboratorNote.hidden = false;
+        const ownerEmail = accountProfile?.collaboration?.ownerEmail;
+        shareCollaboratorNote.textContent = ownerEmail
+          ? `You're viewing a shared puppy log (${ownerEmail}).`
+          : "You're viewing a shared puppy log.";
+        shareOwnerTools.hidden = true;
+      } else {
+        shareCollaboratorNote.hidden = true;
+        shareOwnerTools.hidden = false;
+      }
+    }
     addStatus.textContent = isSetupComplete ? addStatus.textContent : "Add arrival and birth dates first.";
     previousDayButton.disabled = !settings.arrivalDate || selectedDateKey <= settings.arrivalDate;
     nextDayButton.disabled = selectedDateKey >= todayKey;
@@ -307,9 +355,53 @@ export function renderPuppyLog() {
     event.preventDefault();
     remoteSync.signOut().then(() => {
       isSignedIn = false;
+      accountProfile = null;
       if (syncStatus) syncStatus.textContent = "";
+      if (shareInviteBlock) shareInviteBlock.hidden = true;
+      if (shareStatus) shareStatus.textContent = "";
+      if (inviteUrlInput) inviteUrlInput.value = "";
       renderState();
     });
+  });
+
+  createInviteButton?.addEventListener("click", async () => {
+    if (!createInviteButton || !shareInviteBlock || !inviteUrlInput || !whatsappInviteLink || !shareStatus) {
+      return;
+    }
+
+    shareStatus.textContent = "";
+
+    try {
+      const body = await remoteSync.createInvite();
+      const inviteParam = encodeURIComponent(body.token);
+      const shareUrl = `${window.location.origin}${window.location.pathname}?invite=${inviteParam}`;
+      inviteUrlInput.value = shareUrl;
+      if (inviteExpiryLabel) {
+        inviteExpiryLabel.textContent = body.expiresAt
+          ? `Expires ${new Date(body.expiresAt).toLocaleString()}`
+          : "";
+      }
+
+      whatsappInviteLink.href = `https://wa.me/?text=${encodeURIComponent(`Join our puppy log on PawPrints: ${shareUrl}`)}`;
+      shareInviteBlock.hidden = false;
+    } catch (error) {
+      console.error(error);
+      shareStatus.textContent = error?.message ?? "Could not create invite";
+    }
+  });
+
+  copyInviteButton?.addEventListener("click", async () => {
+    if (!inviteUrlInput || !shareStatus) {
+      return;
+    }
+
+    try {
+      await navigator.clipboard.writeText(inviteUrlInput.value);
+      shareStatus.textContent = "Copied";
+    } catch (error) {
+      console.error(error);
+      shareStatus.textContent = "Could not copy";
+    }
   });
 
   const saveAndSync = () => {
@@ -420,12 +512,27 @@ export function renderPuppyLog() {
 
     try {
       const user = await remoteSync.getCurrentUser({ silent: true });
+      accountProfile = user;
       isSignedIn = Boolean(user);
 
       if (!isSignedIn) {
         if (syncStatus) syncStatus.textContent = "";
         renderState();
         return;
+      }
+
+      const inviteToken = readInviteTokenFromLocation();
+      if (inviteToken) {
+        try {
+          await remoteSync.acceptInvite(inviteToken);
+          stripInviteQueryParam();
+          accountProfile = await remoteSync.getCurrentUser({ silent: true });
+        } catch (inviteError) {
+          console.error(inviteError);
+          bootstrapError = inviteError;
+          renderState();
+          return;
+        }
       }
 
       isBootstrapping = true;

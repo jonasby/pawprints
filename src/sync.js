@@ -144,5 +144,55 @@ export function createRemoteSync(storage, { getSettings, loadEvents, onStatusCha
       });
       onStatusChange?.("Signed out");
     },
+    async createInvite() {
+      const path = "/api/invites";
+      const response = await fetch(createApiUrl(path), {
+        method: "POST",
+        credentials: "include",
+      });
+
+      if (response.status === 401) {
+        onStatusChange?.("Sign in to sync");
+        const error = new Error("Sign in required");
+        error.status = 401;
+        throw error;
+      }
+
+      if (response.status === 403) {
+        const error = new Error("Collaborators cannot create invites");
+        error.status = 403;
+        throw error;
+      }
+
+      if (response.status === 404) {
+        const error = new Error("Save your puppy log once before sharing.");
+        error.status = 404;
+        throw error;
+      }
+
+      if (!response.ok) {
+        throw await createApiError(response, path);
+      }
+
+      return response.json();
+    },
+    async acceptInvite(token) {
+      const trimmed = typeof token === "string" ? token.trim() : "";
+      if (!trimmed) {
+        throw new Error("Missing invite token");
+      }
+
+      const path = `/api/invites/${encodeURIComponent(trimmed)}/accept`;
+      const response = await fetch(createApiUrl(path), {
+        method: "POST",
+        credentials: "include",
+      });
+
+      if (response.status === 204) {
+        return;
+      }
+
+      throw await createApiError(response, path);
+    },
   };
 }

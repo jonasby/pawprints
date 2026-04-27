@@ -74,6 +74,28 @@
               <input type="date" data-birth-date required />
             </label>
           </div>
+          <div class="share-panel" data-share-panel>
+            <p class="share-collaborator-note" data-share-collaborator hidden></p>
+            <div class="share-owner-tools" data-share-owner hidden>
+              <p class="share-heading">Share log</p>
+              <p class="share-hint">
+                Create a link for a partner or sitter. They sign in with Google and see this same puppy log.
+              </p>
+              <button class="muted-button" type="button" data-create-invite>Create invite link</button>
+              <div class="share-invite-block" data-share-invite-block hidden>
+                <label class="field">
+                  <span>Invite link</span>
+                  <input type="text" readonly data-invite-url />
+                </label>
+                <div class="share-actions">
+                  <button class="muted-button" type="button" data-copy-invite>Copy link</button>
+                  <a class="primary-link share-whatsapp" data-whatsapp-invite href="#" target="_blank" rel="noopener noreferrer">WhatsApp</a>
+                </div>
+                <p class="invite-expiry" data-invite-expiry></p>
+              </div>
+              <p class="share-status" data-share-status aria-live="polite"></p>
+            </div>
+          </div>
         </details>
       </section>
 
