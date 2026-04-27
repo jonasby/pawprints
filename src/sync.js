@@ -15,6 +15,21 @@ export function createLoginUrl(returnUrl = window.location.href) {
   return loginUrl.toString();
 }
 
+async function createApiError(response, path) {
+  let responseText = "";
+  try {
+    responseText = await response.text();
+  } catch {
+    responseText = "";
+  }
+
+  const error = new Error(`PawPrints API request failed with ${response.status} at ${path}`);
+  error.status = response.status;
+  error.path = path;
+  error.responseText = responseText?.slice(0, 2000);
+  return error;
+}
+
 export function createRemoteSync(storage, { getSettings, loadEvents, onStatusChange }) {
   let pendingSyncId;
 
@@ -69,33 +84,58 @@ export function createRemoteSync(storage, { getSettings, loadEvents, onStatusCha
         });
       }, SYNC_DEBOUNCE_MS);
     },
-    async getCurrentUser() {
+    async getCurrentUser(options = {}) {
+      const silent = options.silent === true;
       try {
         const response = await fetch(createApiUrl("/api/auth/me"), { credentials: "include" });
         if (!response.ok) {
-          onStatusChange?.("Sign in to sync");
+          if (!silent) {
+            onStatusChange?.("Sign in to sync");
+          }
           return null;
         }
 
         const user = await response.json();
+        if (!user || typeof user.email !== "string" || user.email.length === 0) {
+          if (!silent) {
+            onStatusChange?.("Sign in to sync");
+          }
+          return null;
+        }
+
         onStatusChange?.("Signed in");
         return user;
       } catch {
-        onStatusChange?.("Offline");
+        if (!silent) {
+          onStatusChange?.("Offline");
+        }
         return null;
       }
     },
     async loadSnapshot() {
-      const response = await fetch(createApiUrl("/api/sync"), { credentials: "include" });
+      const path = "/api/sync";
+      const response = await fetch(createApiUrl(path), { credentials: "include" });
       if (response.status === 204 || response.status === 404) {
         return null;
       }
 
       if (!response.ok) {
-        throw new Error(`PawPrints snapshot load failed with ${response.status}`);
+        throw await createApiError(response, path);
       }
 
-      return response.json();
+      const raw = await response.text();
+      if (!raw.trim()) {
+        return null;
+      }
+
+      try {
+        return JSON.parse(raw);
+      } catch {
+        const error = new Error(`PawPrints snapshot response was not valid JSON at ${path}`);
+        error.path = path;
+        error.responseText = raw.slice(0, 2000);
+        throw error;
+      }
     },
     async signOut() {
       await fetch(createApiUrl("/api/auth/logout"), {

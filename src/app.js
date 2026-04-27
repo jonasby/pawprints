@@ -1,6 +1,7 @@
 import {
   EVENT_TYPES,
   addEventWithDefaults,
+  applyStoredEventsSnapshot,
   formatCompactTimeValue,
   getPuppyAgeLabel,
   getEventType,
@@ -169,6 +170,29 @@ function renderEvents({ eventList, emptyState, logSummary, date, dateKey, settin
   });
 }
 
+function formatBootstrapError(error) {
+  const lines = [
+    `Time: ${new Date().toISOString()}`,
+    `Message: ${error?.message ?? "Unknown bootstrap error"}`,
+  ];
+
+  if (error?.path) {
+    lines.push(`API path: ${error.path}`);
+  }
+
+  if (typeof error?.status === "number") {
+    lines.push(`HTTP status: ${error.status}`);
+  }
+
+  if (error?.responseText) {
+    lines.push("");
+    lines.push("Response body:");
+    lines.push(error.responseText);
+  }
+
+  return lines.join("\n");
+}
+
 export function renderPuppyLog() {
   const eventButtons = document.querySelector("[data-event-buttons]");
   const eventList = document.querySelector("[data-event-list]");
@@ -186,16 +210,23 @@ export function renderPuppyLog() {
   const syncStatus = document.querySelector("[data-sync-status]");
   const appSections = document.querySelectorAll("[data-app-section]");
   const loginPanel = document.querySelector("[data-login-panel]");
+  const bootPanel = document.querySelector("[data-boot-panel]");
+  const bootStatus = document.querySelector("[data-boot-status]");
+  const bootHelp = document.querySelector("[data-boot-help]");
+  const bootErrorDetails = document.querySelector("[data-boot-error-details]");
+  const bootRetryButton = document.querySelector("[data-boot-retry]");
   const authUrlElements = document.querySelectorAll("[data-auth-url]");
   const logoutForm = document.querySelector("[data-auth-url='/api/auth/logout']");
   const settings = loadSettings();
   const todayKey = getTodayKey();
   let isSignedIn = false;
+  let isBootstrapping = false;
+  let bootstrapError = null;
   const remoteSync = createRemoteSync(window.localStorage, {
     getSettings: () => settings,
     loadEvents: getStoredEvents,
     onStatusChange(status) {
-      syncStatus.textContent = status;
+      if (syncStatus) syncStatus.textContent = status;
     },
   });
 
@@ -228,12 +259,26 @@ export function renderPuppyLog() {
   const renderState = () => {
     const selectedDate = createLogDate(selectedDateKey);
     const isSetupComplete = hasRequiredSettings(settings);
+    const showBootPanel =
+      isBootstrapping || (isSignedIn && Boolean(bootstrapError));
 
-    loginPanel.hidden = isSignedIn;
+    bootPanel.hidden = !showBootPanel;
+    bootStatus.textContent = isBootstrapping
+      ? "Signing in and loading your synced snapshot..."
+      : "PawPrints could not load your account snapshot.";
+    bootHelp.hidden = !bootstrapError;
+    bootHelp.textContent = bootstrapError
+      ? "Fix the backend issue, then retry. Diagnostic details are below."
+      : "";
+    bootErrorDetails.hidden = !bootstrapError;
+    bootErrorDetails.textContent = bootstrapError ? formatBootstrapError(bootstrapError) : "";
+    bootRetryButton.hidden = !bootstrapError;
+
+    loginPanel.hidden = isSignedIn || showBootPanel;
     appSections.forEach((section) => {
-      section.toggleAttribute("hidden", !isSignedIn);
+      section.toggleAttribute("hidden", !isSignedIn || showBootPanel);
     });
-    if (!isSignedIn) {
+    if (!isSignedIn || showBootPanel) {
       return;
     }
 
@@ -262,7 +307,7 @@ export function renderPuppyLog() {
     event.preventDefault();
     remoteSync.signOut().then(() => {
       isSignedIn = false;
-      syncStatus.textContent = "Signed out";
+      if (syncStatus) syncStatus.textContent = "";
       renderState();
     });
   });
@@ -370,17 +415,50 @@ export function renderPuppyLog() {
     renderState();
   });
 
-  renderButtons(eventButtons);
-  remoteSync.getCurrentUser().then(async (user) => {
-    isSignedIn = Boolean(user);
-    if (isSignedIn) {
-      const snapshot = await remoteSync.loadSnapshot();
-      if (snapshot) {
-        applyRemoteSettings(settings, snapshot.settings);
-        applyStoredEventsSnapshot(window.localStorage, snapshot.events);
+  const bootstrapSignedInState = async () => {
+    bootstrapError = null;
+
+    try {
+      const user = await remoteSync.getCurrentUser({ silent: true });
+      isSignedIn = Boolean(user);
+
+      if (!isSignedIn) {
+        if (syncStatus) syncStatus.textContent = "";
+        renderState();
+        return;
       }
+
+      isBootstrapping = true;
+      renderState();
+
+      try {
+        const snapshot = await remoteSync.loadSnapshot();
+        if (snapshot) {
+          applyRemoteSettings(settings, snapshot.settings);
+          applyStoredEventsSnapshot(window.localStorage, snapshot.events);
+        }
+      } catch (snapshotError) {
+        console.error(snapshotError);
+        bootstrapError = snapshotError;
+      }
+    } catch (error) {
+      console.error(error);
+      bootstrapError = error;
+      isSignedIn = false;
+    } finally {
+      isBootstrapping = false;
+      if (!isSignedIn) {
+        bootstrapError = null;
+      }
+      renderState();
     }
-    renderState();
+  };
+
+  bootRetryButton.addEventListener("click", () => {
+    bootstrapSignedInState();
   });
+
+  renderButtons(eventButtons);
+  bootstrapSignedInState();
   renderState();
 }

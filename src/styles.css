@@ -13,6 +13,11 @@
   box-sizing: border-box;
 }
 
+/* Native [hidden] can be overridden by component display rules (e.g. .login-facade { display: grid }). */
+[hidden] {
+  display: none !important;
+}
+
 body {
   margin: 0;
   min-width: 320px;
@@ -233,25 +238,7 @@ h2 {
   right: 18px;
 }
 
-.sign-out-button {
-  border: 1px solid #fed7aa;
-  border-radius: 999px;
-  padding: 8px 12px;
-  color: #9a5a20;
-  background: #fff;
-  cursor: pointer;
-  font-size: 0.82rem;
-  font-weight: 850;
-}
-
-.sign-out-button:hover,
-.sign-out-button:focus-visible {
-  border-color: #fb923c;
-  outline: 2px solid #fdba74;
-  outline-offset: 2px;
-}
-
-.sync-status {
+.login-facade .sync-status {
   min-height: 1.1rem;
   margin-top: 10px;
   letter-spacing: 0;
@@ -262,6 +249,53 @@ h2 {
   display: grid;
   gap: 12px;
   max-width: 420px;
+}
+
+.boot-panel {
+  display: grid;
+  gap: 10px;
+}
+
+.boot-status {
+  margin: 0;
+  color: #6b4f3c;
+  font-weight: 700;
+}
+
+.boot-help {
+  margin: 0;
+  color: #9a5a20;
+}
+
+.boot-error-details {
+  margin: 0;
+  max-width: 100%;
+  overflow-x: auto;
+  border: 1px solid #fed7aa;
+  border-radius: 10px;
+  padding: 10px;
+  color: #7f1d1d;
+  background: #fff7ed;
+  font-size: 0.8rem;
+  line-height: 1.45;
+}
+
+.retry-button {
+  width: fit-content;
+  border: 1px solid #fed7aa;
+  border-radius: 999px;
+  padding: 8px 12px;
+  color: #9a5a20;
+  background: #fff;
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.retry-button:hover,
+.retry-button:focus-visible {
+  border-color: #fb923c;
+  outline: 2px solid #fdba74;
+  outline-offset: 2px;
 }
 
 .login-facade p {
@@ -285,6 +319,12 @@ h2 {
   background: #7c4215;
   outline: 2px solid #fdba74;
   outline-offset: 2px;
+}
+
+button.primary-link {
+  border: none;
+  color: #fff;
+  cursor: pointer;
 }
 
 .event-list {

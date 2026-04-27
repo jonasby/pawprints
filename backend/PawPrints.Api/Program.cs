@@ -71,9 +71,10 @@ var authentication = builder.Services
     .AddAuthentication(options =>
     {
         options.DefaultAuthenticateScheme = CookieAuthenticationDefaults.AuthenticationScheme;
-        options.DefaultChallengeScheme = googleAuthConfigured
-            ? GoogleDefaults.AuthenticationScheme
-            : CookieAuthenticationDefaults.AuthenticationScheme;
+        // Use Cookie for challenges so /api/* gets 401 (see cookie OnRedirectToLogin), not a 302 to
+        // Google OAuth. SPA fetch cannot follow Google's authorization URL (CORS). Explicit login
+        // uses Results.Challenge(..., GoogleDefaults.AuthenticationScheme) on /api/auth/login.
+        options.DefaultChallengeScheme = CookieAuthenticationDefaults.AuthenticationScheme;
         options.DefaultSignInScheme = CookieAuthenticationDefaults.AuthenticationScheme;
     })
     .AddCookie(options =>

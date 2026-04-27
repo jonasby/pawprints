@@ -19,19 +19,27 @@
         </div>
         <div class="auth-bar" data-app-section hidden>
           <form action="/api/auth/logout" method="post" data-auth-url="/api/auth/logout">
-            <button type="submit">Sign out</button>
+            <button type="submit" class="primary-link">Sign out</button>
           </form>
-          <span data-sync-status aria-live="polite"></span>
         </div>
       </section>
 
       <section class="card login-facade" data-login-panel aria-labelledby="login-title">
         <h2 id="login-title">Sign in to PawPrints</h2>
-        <p>Your puppy log is private. Sign in with Google to sync it securely.</p>
         <a class="primary-link" href="/api/auth/login" data-auth-url="/api/auth/login">
           Sign in with Google
         </a>
         <p class="sync-status" data-login-status aria-live="polite"></p>
+      </section>
+
+      <section class="card boot-panel" data-boot-panel hidden aria-labelledby="boot-title">
+        <h2 id="boot-title">Preparing your log</h2>
+        <p class="boot-status" data-boot-status aria-live="polite"></p>
+        <p class="boot-help" data-boot-help hidden></p>
+        <pre class="boot-error-details" data-boot-error-details hidden></pre>
+        <button class="retry-button" type="button" data-boot-retry hidden>
+          Retry loading snapshot
+        </button>
       </section>
 
       <section class="card settings" aria-labelledby="settings-title" data-app-section hidden>
