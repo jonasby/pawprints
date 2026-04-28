@@ -10,6 +10,8 @@ using PawPrints.Api.Data;
 using PawPrints.Api.Invites;
 using PawPrints.Api.Sync;
 
+const string AuthenticatedPawPrintsUserPolicy = "AuthenticatedPawPrintsUser";
+
 var builder = WebApplication.CreateBuilder(args);
 var isDevelopment = builder.Environment.IsDevelopment();
 
@@ -127,7 +129,7 @@ if (googleAuthConfigured)
 builder.Services.AddAuthorization(options =>
 {
     options.AddPolicy(
-        "AuthenticatedPawPrintsUser",
+        AuthenticatedPawPrintsUserPolicy,
         policy => policy
             .RequireAuthenticatedUser()
     );
@@ -202,7 +204,7 @@ app.MapPost("/api/auth/logout", async (HttpContext httpContext) =>
 
 app.MapGet(
     "/api/auth/me",
-    [Authorize(Policy = "AuthenticatedPawPrintsUser")]
+    [Authorize(Policy = AuthenticatedPawPrintsUserPolicy)]
     async (
         ClaimsPrincipal user,
         PawPrintsDbContext dbContext,
@@ -231,7 +233,7 @@ app.MapGet(
 
 app.MapPost(
     "/api/invites",
-    [Authorize(Policy = "AuthenticatedPawPrintsUser")]
+    [Authorize(Policy = AuthenticatedPawPrintsUserPolicy)]
     async (
         CurrentUser currentUser,
         InviteService inviteService,
@@ -265,7 +267,7 @@ app.MapPost(
 
 app.MapPost(
     "/api/invites/{token}/accept",
-    [Authorize(Policy = "AuthenticatedPawPrintsUser")]
+    [Authorize(Policy = AuthenticatedPawPrintsUserPolicy)]
     async (
         string token,
         CurrentUser currentUser,
@@ -291,7 +293,7 @@ app.MapPost(
 
 app.MapGet(
     "/api/sync",
-    [Authorize(Policy = "AuthenticatedPawPrintsUser")]
+    [Authorize(Policy = AuthenticatedPawPrintsUserPolicy)]
     async (
         CurrentUser currentUser,
         SnapshotSyncService syncService,
@@ -305,7 +307,7 @@ app.MapGet(
 
 app.MapPut(
     "/api/sync",
-    [Authorize(Policy = "AuthenticatedPawPrintsUser")]
+    [Authorize(Policy = AuthenticatedPawPrintsUserPolicy)]
     async (
         SyncSnapshotRequest snapshot,
         CurrentUser currentUser,
