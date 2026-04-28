@@ -230,7 +230,7 @@ export function renderPuppyLog() {
   const previousDayButton = document.querySelector("[data-previous-day]");
   const nextDayButton = document.querySelector("[data-next-day]");
   const addStatus = document.querySelector("[data-add-status]");
-  const syncStatus = document.querySelector("[data-sync-status]");
+  const syncStatus = document.querySelector("[data-login-status]");
   const appSections = document.querySelectorAll("[data-app-section]");
   const loginPanel = document.querySelector("[data-login-panel]");
   const bootPanel = document.querySelector("[data-boot-panel]");
@@ -292,8 +292,7 @@ export function renderPuppyLog() {
   const renderState = () => {
     const selectedDate = createLogDate(selectedDateKey);
     const isSetupComplete = hasRequiredSettings(settings);
-    const showBootPanel =
-      isBootstrapping || (isSignedIn && Boolean(bootstrapError));
+    const showBootPanel = isBootstrapping || Boolean(bootstrapError);
 
     bootPanel.hidden = !showBootPanel;
     bootStatus.textContent = isBootstrapping
@@ -301,7 +300,7 @@ export function renderPuppyLog() {
       : "PawPrints could not load your account snapshot.";
     bootHelp.hidden = !bootstrapError;
     bootHelp.textContent = bootstrapError
-      ? "Fix the backend issue, then retry. Diagnostic details are below."
+      ? "Authentication did not complete or snapshot loading failed. Retry sign-in in a regular browser tab, then retry loading."
       : "";
     bootErrorDetails.hidden = !bootstrapError;
     bootErrorDetails.textContent = bootstrapError ? formatBootstrapError(bootstrapError) : "";
@@ -511,17 +510,29 @@ export function renderPuppyLog() {
     bootstrapError = null;
 
     try {
+      const inviteToken = readInviteTokenFromLocation();
       const user = await remoteSync.getCurrentUser({ silent: true });
       accountProfile = user;
       isSignedIn = Boolean(user);
 
       if (!isSignedIn) {
-        if (syncStatus) syncStatus.textContent = "";
+        if (inviteToken) {
+          bootstrapError = {
+            message:
+              "Invite sign-in did not complete. Please tap 'Sign in with Google' again in a regular browser tab (not in-app browser) and return to this invite link.",
+            status: 401,
+            path: "/api/auth/me",
+          };
+          if (syncStatus) {
+            syncStatus.textContent = "Invite sign-in failed. Retry in a browser tab.";
+          }
+        } else if (syncStatus) {
+          syncStatus.textContent = "";
+        }
         renderState();
         return;
       }
 
-      const inviteToken = readInviteTokenFromLocation();
       if (inviteToken) {
         try {
           await remoteSync.acceptInvite(inviteToken);
@@ -554,7 +565,7 @@ export function renderPuppyLog() {
       isSignedIn = false;
     } finally {
       isBootstrapping = false;
-      if (!isSignedIn) {
+      if (!isSignedIn && !readInviteTokenFromLocation()) {
         bootstrapError = null;
       }
       renderState();
