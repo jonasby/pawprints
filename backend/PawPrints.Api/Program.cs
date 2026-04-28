@@ -94,6 +94,19 @@ var authentication = builder.Services
         options.LogoutPath = "/api/auth/logout";
         options.Events.OnRedirectToLogin = context =>
         {
+            var logger = context.HttpContext.RequestServices
+                .GetRequiredService<ILoggerFactory>()
+                .CreateLogger("PawPrints.Auth.Cookie");
+            logger.LogWarning(
+                "Cookie auth challenge for {Path}. IsAuthenticated={IsAuthenticated}. HasCookieHeader={HasCookieHeader}. Origin={Origin}. Referer={Referer}. UserAgent={UserAgent}.",
+                context.Request.Path,
+                context.HttpContext.User.Identity?.IsAuthenticated ?? false,
+                context.Request.Headers.ContainsKey("Cookie"),
+                context.Request.Headers.Origin.ToString(),
+                context.Request.Headers.Referer.ToString(),
+                context.Request.Headers.UserAgent.ToString()
+            );
+
             if (context.Request.Path.StartsWithSegments("/api"))
             {
                 context.Response.StatusCode = StatusCodes.Status401Unauthorized;
@@ -105,6 +118,16 @@ var authentication = builder.Services
         };
         options.Events.OnRedirectToAccessDenied = context =>
         {
+            var logger = context.HttpContext.RequestServices
+                .GetRequiredService<ILoggerFactory>()
+                .CreateLogger("PawPrints.Auth.Cookie");
+            logger.LogWarning(
+                "Cookie auth access denied for {Path}. IsAuthenticated={IsAuthenticated}. HasCookieHeader={HasCookieHeader}.",
+                context.Request.Path,
+                context.HttpContext.User.Identity?.IsAuthenticated ?? false,
+                context.Request.Headers.ContainsKey("Cookie")
+            );
+
             if (context.Request.Path.StartsWithSegments("/api"))
             {
                 context.Response.StatusCode = StatusCodes.Status403Forbidden;
@@ -123,6 +146,33 @@ if (googleAuthConfigured)
         options.ClientId = googleClientId!;
         options.ClientSecret = googleClientSecret!;
         options.CallbackPath = "/api/auth/google-callback";
+        options.Events.OnTicketReceived = context =>
+        {
+            var logger = context.HttpContext.RequestServices
+                .GetRequiredService<ILoggerFactory>()
+                .CreateLogger("PawPrints.Auth.Google");
+            logger.LogInformation(
+                "Google ticket received. RedirectUri={RedirectUri}. HasCookieHeader={HasCookieHeader}. Email={Email}.",
+                context.Properties?.RedirectUri,
+                context.Request.Headers.ContainsKey("Cookie"),
+                context.Principal?.FindFirstValue(ClaimTypes.Email) ?? "(missing)"
+            );
+            return Task.CompletedTask;
+        };
+        options.Events.OnRemoteFailure = context =>
+        {
+            var logger = context.HttpContext.RequestServices
+                .GetRequiredService<ILoggerFactory>()
+                .CreateLogger("PawPrints.Auth.Google");
+            logger.LogWarning(
+                context.Failure,
+                "Google remote failure. FailureMessage={FailureMessage}. Path={Path}. Query={Query}.",
+                context.Failure?.Message,
+                context.Request.Path,
+                context.Request.QueryString.ToString()
+            );
+            return Task.CompletedTask;
+        };
     });
 }
 
@@ -179,8 +229,13 @@ app.UseAuthorization();
 
 app.MapGet("/api/auth/login", (string? returnUrl) =>
 {
+    var logger = app.Services.GetRequiredService<ILoggerFactory>()
+        .CreateLogger("PawPrints.Auth.Login");
+    logger.LogInformation("Auth login requested. ReturnUrl={ReturnUrl}.", returnUrl);
+
     if (!googleAuthConfigured)
     {
+        logger.LogWarning("Auth login rejected because Google sign-in is not configured.");
         return Results.Problem(
             title: "Google sign-in is not configured.",
             detail: "Set Authentication__Google__ClientId and Authentication__Google__ClientSecret on the API App Service.",
@@ -198,6 +253,13 @@ app.MapGet("/api/auth/login", (string? returnUrl) =>
 
 app.MapPost("/api/auth/logout", async (HttpContext httpContext) =>
 {
+    var logger = httpContext.RequestServices.GetRequiredService<ILoggerFactory>()
+        .CreateLogger("PawPrints.Auth.Logout");
+    logger.LogInformation(
+        "Auth logout requested. IsAuthenticatedBeforeLogout={IsAuthenticated}. HasCookieHeader={HasCookieHeader}.",
+        httpContext.User.Identity?.IsAuthenticated ?? false,
+        httpContext.Request.Headers.ContainsKey("Cookie")
+    );
     await httpContext.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
     return Results.NoContent();
 });
@@ -207,11 +269,21 @@ app.MapGet(
     [Authorize(Policy = AuthenticatedPawPrintsUserPolicy)]
     async (
         ClaimsPrincipal user,
+        HttpContext httpContext,
         PawPrintsDbContext dbContext,
         CancellationToken cancellationToken
     ) =>
     {
+        var logger = httpContext.RequestServices.GetRequiredService<ILoggerFactory>()
+            .CreateLogger("PawPrints.Auth.Me");
         var email = user.FindFirstValue(ClaimTypes.Email)!;
+        logger.LogInformation(
+            "Auth /me succeeded. Email={Email}. HasCookieHeader={HasCookieHeader}. Origin={Origin}. Referer={Referer}.",
+            email,
+            httpContext.Request.Headers.ContainsKey("Cookie"),
+            httpContext.Request.Headers.Origin.ToString(),
+            httpContext.Request.Headers.Referer.ToString()
+        );
         var storedUser = await dbContext.Users.AsNoTracking().SingleOrDefaultAsync(
             candidate => candidate.Email == email,
             cancellationToken
