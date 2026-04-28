@@ -3,7 +3,6 @@ using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authentication.Google;
 using Microsoft.AspNetCore.Authorization;
-using Microsoft.AspNetCore.DataProtection;
 using Microsoft.EntityFrameworkCore;
 using PawPrints.Api;
 using PawPrints.Api.Contracts;
@@ -13,24 +12,10 @@ using PawPrints.Api.Sync;
 
 var builder = WebApplication.CreateBuilder(args);
 var isDevelopment = builder.Environment.IsDevelopment();
-var dataProtectionKeysPath = ProgramConfiguration.GetDataProtectionKeysPath();
 
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 builder.Services.AddHttpContextAccessor();
-if (!string.IsNullOrWhiteSpace(dataProtectionKeysPath))
-{
-    Directory.CreateDirectory(dataProtectionKeysPath);
-    builder.Services
-        .AddDataProtection()
-        .PersistKeysToFileSystem(new DirectoryInfo(dataProtectionKeysPath))
-        .SetApplicationName("PawPrints");
-    Console.WriteLine($"Persisting ASP.NET Data Protection keys at '{dataProtectionKeysPath}'.");
-}
-else
-{
-    Console.WriteLine("Using default ASP.NET Data Protection key storage.");
-}
 builder.Services.AddScoped<CurrentUser>();
 builder.Services.AddScoped<SnapshotSyncService>();
 builder.Services.AddScoped<InviteService>();
@@ -339,29 +324,6 @@ public partial class Program;
 
 public static partial class ProgramConfiguration
 {
-    public static string? GetDataProtectionKeysPath()
-    {
-        var explicitPath = Environment.GetEnvironmentVariable("DATA_PROTECTION_KEYS_PATH");
-        if (!string.IsNullOrWhiteSpace(explicitPath))
-        {
-            return explicitPath;
-        }
-
-        var home = Environment.GetEnvironmentVariable("HOME");
-        if (!string.IsNullOrWhiteSpace(home))
-        {
-            return Path.Combine(home, "ASP.NET", "DataProtection-Keys");
-        }
-
-        var localAppData = Environment.GetEnvironmentVariable("LOCALAPPDATA");
-        if (!string.IsNullOrWhiteSpace(localAppData))
-        {
-            return Path.Combine(localAppData, "PawPrints", "DataProtection-Keys");
-        }
-
-        return null;
-    }
-
     public static string? GetFirstConfiguredValue(IConfiguration configuration, params string[] keys)
     {
         return keys
