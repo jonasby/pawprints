@@ -1,14 +1,9 @@
-name: Deploy API to Azure
+name: Deploy PawPrints to Azure
 
 on:
   push:
     branches:
       - main
-    paths:
-      - "backend/**"
-      - "tests/PawPrints.Api.Tests/**"
-      - "PawPrints.sln"
-      - ".github/workflows/api.yml"
   workflow_dispatch:
 
 permissions:
@@ -28,6 +23,21 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v5
 
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Test frontend
+        run: npm test
+
+      - name: Build frontend
+        run: npm run build
+
       - name: Setup .NET
         uses: actions/setup-dotnet@v5
         with:
@@ -36,7 +46,13 @@ jobs:
       - name: Test API
         run: dotnet test PawPrints.sln --configuration Release
 
-      - name: Publish API
+      - name: Prepare API wwwroot with SPA assets
+        run: |
+          rm -rf backend/PawPrints.Api/wwwroot
+          mkdir -p backend/PawPrints.Api/wwwroot
+          cp -r dist/. backend/PawPrints.Api/wwwroot/
+
+      - name: Publish API + SPA
         run: dotnet publish backend/PawPrints.Api/PawPrints.Api.csproj --configuration Release --output api-publish
 
       - name: Azure login

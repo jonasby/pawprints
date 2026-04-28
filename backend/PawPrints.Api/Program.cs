@@ -224,6 +224,8 @@ if (app.Environment.IsDevelopment())
 
 app.UseHttpsRedirection();
 app.UseCors("Frontend");
+app.UseDefaultFiles();
+app.UseStaticFiles();
 app.UseAuthentication();
 app.UseAuthorization();
 
@@ -391,6 +393,9 @@ app.MapPut(
         return Results.NoContent();
     }
 );
+
+// Serve SPA routes from the same host/App Service while keeping /api endpoints handled above.
+app.MapFallbackToFile("index.html");
 
 app.Run();
 
