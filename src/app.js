@@ -21,6 +21,7 @@ const dateFormatter = new Intl.DateTimeFormat(undefined, {
 });
 
 const SETTINGS_KEY = "pawprints-settings";
+const HAS_SIGNED_IN_KEY = "pawprints-has-signed-in";
 
 const defaultSettings = {
   arrivalDate: "",
@@ -40,6 +41,18 @@ function loadSettings() {
 
 function saveSettings(settings) {
   window.localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+}
+
+function hasSignedInBefore() {
+  return window.localStorage.getItem(HAS_SIGNED_IN_KEY) === "1";
+}
+
+function markSignedIn() {
+  window.localStorage.setItem(HAS_SIGNED_IN_KEY, "1");
+}
+
+function clearSignedInMarker() {
+  window.localStorage.removeItem(HAS_SIGNED_IN_KEY);
 }
 
 function readInviteTokenFromLocation() {
@@ -230,7 +243,7 @@ export function renderPuppyLog() {
   const previousDayButton = document.querySelector("[data-previous-day]");
   const nextDayButton = document.querySelector("[data-next-day]");
   const addStatus = document.querySelector("[data-add-status]");
-  const syncStatus = document.querySelector("[data-sync-status]");
+  const syncStatus = document.querySelector("[data-login-status]");
   const appSections = document.querySelectorAll("[data-app-section]");
   const loginPanel = document.querySelector("[data-login-panel]");
   const bootPanel = document.querySelector("[data-boot-panel]");
@@ -238,6 +251,7 @@ export function renderPuppyLog() {
   const bootHelp = document.querySelector("[data-boot-help]");
   const bootErrorDetails = document.querySelector("[data-boot-error-details]");
   const bootRetryButton = document.querySelector("[data-boot-retry]");
+  const bootLoginLink = document.querySelector("[data-boot-login]");
   const authUrlElements = document.querySelectorAll("[data-auth-url]");
   const logoutForm = document.querySelector("[data-auth-url='/api/auth/logout']");
   const shareCollaboratorNote = document.querySelector("[data-share-collaborator]");
@@ -292,8 +306,7 @@ export function renderPuppyLog() {
   const renderState = () => {
     const selectedDate = createLogDate(selectedDateKey);
     const isSetupComplete = hasRequiredSettings(settings);
-    const showBootPanel =
-      isBootstrapping || (isSignedIn && Boolean(bootstrapError));
+    const showBootPanel = isBootstrapping || Boolean(bootstrapError);
 
     bootPanel.hidden = !showBootPanel;
     bootStatus.textContent = isBootstrapping
@@ -301,11 +314,14 @@ export function renderPuppyLog() {
       : "PawPrints could not load your account snapshot.";
     bootHelp.hidden = !bootstrapError;
     bootHelp.textContent = bootstrapError
-      ? "Fix the backend issue, then retry. Diagnostic details are below."
+      ? "Authentication did not complete or snapshot loading failed. Retry sign-in in a regular browser tab, then retry loading."
       : "";
     bootErrorDetails.hidden = !bootstrapError;
     bootErrorDetails.textContent = bootstrapError ? formatBootstrapError(bootstrapError) : "";
     bootRetryButton.hidden = !bootstrapError;
+    if (bootLoginLink) {
+      bootLoginLink.hidden = !bootstrapError;
+    }
 
     loginPanel.hidden = isSignedIn || showBootPanel;
     appSections.forEach((section) => {
@@ -356,6 +372,8 @@ export function renderPuppyLog() {
     remoteSync.signOut().then(() => {
       isSignedIn = false;
       accountProfile = null;
+      bootstrapError = null;
+      clearSignedInMarker();
       if (syncStatus) syncStatus.textContent = "";
       if (shareInviteBlock) shareInviteBlock.hidden = true;
       if (shareStatus) shareStatus.textContent = "";
@@ -511,17 +529,41 @@ export function renderPuppyLog() {
     bootstrapError = null;
 
     try {
+      const inviteToken = readInviteTokenFromLocation();
       const user = await remoteSync.getCurrentUser({ silent: true });
       accountProfile = user;
       isSignedIn = Boolean(user);
 
       if (!isSignedIn) {
-        if (syncStatus) syncStatus.textContent = "";
+        if (inviteToken) {
+          bootstrapError = {
+            message:
+              "Invite sign-in did not complete. Please tap 'Sign in with Google' again in a regular browser tab (not in-app browser) and return to this invite link.",
+            status: 401,
+            path: "/api/auth/me",
+          };
+          if (syncStatus) {
+            syncStatus.textContent = "Invite sign-in failed. Retry in a browser tab.";
+          }
+        } else if (hasSignedInBefore()) {
+          bootstrapError = {
+            message:
+              "We couldn't restore your signed-in session. Sign in again to continue syncing your puppy log.",
+            status: 401,
+            path: "/api/auth/me",
+          };
+          if (syncStatus) {
+            syncStatus.textContent = "Session expired. Sign in again.";
+          }
+        } else if (syncStatus) {
+          bootstrapError = null;
+          syncStatus.textContent = "";
+        }
         renderState();
         return;
       }
+      markSignedIn();
 
-      const inviteToken = readInviteTokenFromLocation();
       if (inviteToken) {
         try {
           await remoteSync.acceptInvite(inviteToken);
@@ -554,9 +596,6 @@ export function renderPuppyLog() {
       isSignedIn = false;
     } finally {
       isBootstrapping = false;
-      if (!isSignedIn) {
-        bootstrapError = null;
-      }
       renderState();
     }
   };

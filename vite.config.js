@@ -2,7 +2,7 @@ import basicSsl from "@vitejs/plugin-basic-ssl";
 import { defineConfig } from "vite";
 
 export default defineConfig(({ command }) => ({
-  base: command === "build" ? "/pawprints/" : "/",
+  base: "/",
   plugins: [
     basicSsl({
       name: "pawprints",

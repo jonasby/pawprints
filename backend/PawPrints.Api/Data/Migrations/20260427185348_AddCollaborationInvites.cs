@@ -14,21 +14,21 @@ namespace PawPrints.Api.Data.Migrations
             migrationBuilder.AddColumn<long>(
                 name: "CollaboratesWithUserId",
                 table: "Users",
-                type: "INTEGER",
+                type: "bigint",
                 nullable: true);
 
             migrationBuilder.CreateTable(
                 name: "Invites",
                 columns: table => new
                 {
-                    Id = table.Column<long>(type: "INTEGER", nullable: false)
-                        .Annotation("Sqlite:Autoincrement", true),
-                    TokenHash = table.Column<string>(type: "TEXT", maxLength: 64, nullable: false),
-                    OwnerUserId = table.Column<long>(type: "INTEGER", nullable: false),
-                    CreatedAtUtc = table.Column<DateTimeOffset>(type: "TEXT", nullable: false),
-                    ExpiresAtUtc = table.Column<DateTimeOffset>(type: "TEXT", nullable: false),
-                    ConsumedAtUtc = table.Column<DateTimeOffset>(type: "TEXT", nullable: true),
-                    ConsumedByUserId = table.Column<long>(type: "INTEGER", nullable: true)
+                    Id = table.Column<long>(type: "bigint", nullable: false)
+                        .Annotation("SqlServer:Identity", "1, 1"),
+                    TokenHash = table.Column<string>(type: "nvarchar(64)", maxLength: 64, nullable: false),
+                    OwnerUserId = table.Column<long>(type: "bigint", nullable: false),
+                    CreatedAtUtc = table.Column<DateTimeOffset>(type: "datetimeoffset", nullable: false),
+                    ExpiresAtUtc = table.Column<DateTimeOffset>(type: "datetimeoffset", nullable: false),
+                    ConsumedAtUtc = table.Column<DateTimeOffset>(type: "datetimeoffset", nullable: true),
+                    ConsumedByUserId = table.Column<long>(type: "bigint", nullable: true)
                 },
                 constraints: table =>
                 {

@@ -13,6 +13,8 @@ using PawPrints.Api.Sync;
 using Serilog;
 using Serilog.Formatting.Compact;
 
+const string AuthenticatedPawPrintsUserPolicy = "AuthenticatedPawPrintsUser";
+
 Log.Logger = new LoggerConfiguration()
     .MinimumLevel.Information()
     .WriteTo.Console(new CompactJsonFormatter())
@@ -88,49 +90,72 @@ try
         && !string.IsNullOrWhiteSpace(googleClientSecret);
 
     var authentication = builder.Services
-    .AddAuthentication(options =>
-    {
-        options.DefaultAuthenticateScheme = CookieAuthenticationDefaults.AuthenticationScheme;
-        // Use Cookie for challenges so /api/* gets 401 (see cookie OnRedirectToLogin), not a 302 to
-        // Google OAuth. SPA fetch cannot follow Google's authorization URL (CORS). Explicit login
-        // uses Results.Challenge(..., GoogleDefaults.AuthenticationScheme) on /api/auth/login.
-        options.DefaultChallengeScheme = CookieAuthenticationDefaults.AuthenticationScheme;
-        options.DefaultSignInScheme = CookieAuthenticationDefaults.AuthenticationScheme;
-    })
-    .AddCookie(options =>
-    {
-        // Local HTTP development cannot use __Host- prefixed secure-only cookies.
-        // Production keeps stricter cookie settings.
-        options.Cookie.Name = isDevelopment ? "PawPrints.Dev" : "__Host-PawPrints";
-        options.Cookie.SameSite = isDevelopment ? SameSiteMode.Lax : SameSiteMode.None;
-        options.Cookie.SecurePolicy = isDevelopment
-            ? CookieSecurePolicy.SameAsRequest
-            : CookieSecurePolicy.Always;
-        options.LoginPath = "/api/auth/login";
-        options.LogoutPath = "/api/auth/logout";
-        options.Events.OnRedirectToLogin = context =>
+        .AddAuthentication(options =>
         {
-            if (context.Request.Path.StartsWithSegments("/api"))
-            {
-                context.Response.StatusCode = StatusCodes.Status401Unauthorized;
-                return Task.CompletedTask;
-            }
-
-            context.Response.Redirect(context.RedirectUri);
-            return Task.CompletedTask;
-        };
-        options.Events.OnRedirectToAccessDenied = context =>
+            options.DefaultAuthenticateScheme = CookieAuthenticationDefaults.AuthenticationScheme;
+            // Use Cookie for challenges so /api/* gets 401 (see cookie OnRedirectToLogin), not a 302 to
+            // Google OAuth. SPA fetch cannot follow Google's authorization URL (CORS). Explicit login
+            // uses Results.Challenge(..., GoogleDefaults.AuthenticationScheme) on /api/auth/login.
+            options.DefaultChallengeScheme = CookieAuthenticationDefaults.AuthenticationScheme;
+            options.DefaultSignInScheme = CookieAuthenticationDefaults.AuthenticationScheme;
+        })
+        .AddCookie(options =>
         {
-            if (context.Request.Path.StartsWithSegments("/api"))
+            // Local HTTP development cannot use __Host- prefixed secure-only cookies.
+            // Production keeps stricter cookie settings.
+            options.Cookie.Name = isDevelopment ? "PawPrints.Dev" : "__Host-PawPrints";
+            options.Cookie.SameSite = isDevelopment ? SameSiteMode.Lax : SameSiteMode.None;
+            options.Cookie.SecurePolicy = isDevelopment
+                ? CookieSecurePolicy.SameAsRequest
+                : CookieSecurePolicy.Always;
+            options.LoginPath = "/api/auth/login";
+            options.LogoutPath = "/api/auth/logout";
+            options.Events.OnRedirectToLogin = context =>
             {
-                context.Response.StatusCode = StatusCodes.Status403Forbidden;
-                return Task.CompletedTask;
-            }
+                var logger = context.HttpContext.RequestServices
+                    .GetRequiredService<ILoggerFactory>()
+                    .CreateLogger("PawPrints.Auth.Cookie");
+                logger.LogWarning(
+                    "Cookie auth challenge for {Path}. IsAuthenticated={IsAuthenticated}. HasCookieHeader={HasCookieHeader}. Origin={Origin}. Referer={Referer}. UserAgent={UserAgent}.",
+                    context.Request.Path,
+                    context.HttpContext.User.Identity?.IsAuthenticated ?? false,
+                    context.Request.Headers.ContainsKey("Cookie"),
+                    context.Request.Headers.Origin.ToString(),
+                    context.Request.Headers.Referer.ToString(),
+                    context.Request.Headers.UserAgent.ToString()
+                );
 
-            context.Response.Redirect(context.RedirectUri);
-            return Task.CompletedTask;
-        };
-    });
+                if (context.Request.Path.StartsWithSegments("/api"))
+                {
+                    context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+                    return Task.CompletedTask;
+                }
+
+                context.Response.Redirect(context.RedirectUri);
+                return Task.CompletedTask;
+            };
+            options.Events.OnRedirectToAccessDenied = context =>
+            {
+                var logger = context.HttpContext.RequestServices
+                    .GetRequiredService<ILoggerFactory>()
+                    .CreateLogger("PawPrints.Auth.Cookie");
+                logger.LogWarning(
+                    "Cookie auth access denied for {Path}. IsAuthenticated={IsAuthenticated}. HasCookieHeader={HasCookieHeader}.",
+                    context.Request.Path,
+                    context.HttpContext.User.Identity?.IsAuthenticated ?? false,
+                    context.Request.Headers.ContainsKey("Cookie")
+                );
+
+                if (context.Request.Path.StartsWithSegments("/api"))
+                {
+                    context.Response.StatusCode = StatusCodes.Status403Forbidden;
+                    return Task.CompletedTask;
+                }
+
+                context.Response.Redirect(context.RedirectUri);
+                return Task.CompletedTask;
+            };
+        });
 
     if (googleAuthConfigured)
     {
@@ -139,13 +164,40 @@ try
             options.ClientId = googleClientId!;
             options.ClientSecret = googleClientSecret!;
             options.CallbackPath = "/api/auth/google-callback";
+            options.Events.OnTicketReceived = context =>
+            {
+                var logger = context.HttpContext.RequestServices
+                    .GetRequiredService<ILoggerFactory>()
+                    .CreateLogger("PawPrints.Auth.Google");
+                logger.LogInformation(
+                    "Google ticket received. RedirectUri={RedirectUri}. HasCookieHeader={HasCookieHeader}. Email={Email}.",
+                    context.Properties?.RedirectUri,
+                    context.Request.Headers.ContainsKey("Cookie"),
+                    context.Principal?.FindFirstValue(ClaimTypes.Email) ?? "(missing)"
+                );
+                return Task.CompletedTask;
+            };
+            options.Events.OnRemoteFailure = context =>
+            {
+                var logger = context.HttpContext.RequestServices
+                    .GetRequiredService<ILoggerFactory>()
+                    .CreateLogger("PawPrints.Auth.Google");
+                logger.LogWarning(
+                    context.Failure,
+                    "Google remote failure. FailureMessage={FailureMessage}. Path={Path}. Query={Query}.",
+                    context.Failure?.Message,
+                    context.Request.Path,
+                    context.Request.QueryString.ToString()
+                );
+                return Task.CompletedTask;
+            };
         });
     }
 
     builder.Services.AddAuthorization(options =>
     {
         options.AddPolicy(
-            "AuthenticatedPawPrintsUser",
+            AuthenticatedPawPrintsUserPolicy,
             policy => policy
                 .RequireAuthenticatedUser()
         );
@@ -199,13 +251,20 @@ try
 
     app.UseHttpsRedirection();
     app.UseCors("Frontend");
+    app.UseDefaultFiles();
+    app.UseStaticFiles();
     app.UseAuthentication();
     app.UseAuthorization();
 
     app.MapGet("/api/auth/login", (string? returnUrl) =>
     {
+        var logger = app.Services.GetRequiredService<ILoggerFactory>()
+            .CreateLogger("PawPrints.Auth.Login");
+        logger.LogInformation("Auth login requested. ReturnUrl={ReturnUrl}.", returnUrl);
+
         if (!googleAuthConfigured)
         {
+            logger.LogWarning("Auth login rejected because Google sign-in is not configured.");
             return Results.Problem(
                 title: "Google sign-in is not configured.",
                 detail: "Set Authentication__Google__ClientId and Authentication__Google__ClientSecret on the API App Service.",
@@ -223,156 +282,176 @@ try
 
     app.MapPost("/api/auth/logout", async (HttpContext httpContext) =>
     {
+        var logger = httpContext.RequestServices.GetRequiredService<ILoggerFactory>()
+            .CreateLogger("PawPrints.Auth.Logout");
+        logger.LogInformation(
+            "Auth logout requested. IsAuthenticatedBeforeLogout={IsAuthenticated}. HasCookieHeader={HasCookieHeader}.",
+            httpContext.User.Identity?.IsAuthenticated ?? false,
+            httpContext.Request.Headers.ContainsKey("Cookie")
+        );
         await httpContext.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
         return Results.NoContent();
     });
 
     app.MapGet(
-    "/api/auth/me",
-    [Authorize(Policy = "AuthenticatedPawPrintsUser")]
-    async (
-        ClaimsPrincipal user,
-        PawPrintsDbContext dbContext,
-        ILoggerFactory loggerFactory,
-        CancellationToken cancellationToken
-    ) =>
-    {
-        var meLogger = loggerFactory.CreateLogger("PawPrints.Auth");
-        var email = user.FindFirstValue(ClaimTypes.Email)!;
-        var storedUser = await dbContext.Users.AsNoTracking().SingleOrDefaultAsync(
-            candidate => candidate.Email == email,
-            cancellationToken
-        );
-
-        if (storedUser is null)
+        "/api/auth/me",
+        [Authorize(Policy = AuthenticatedPawPrintsUserPolicy)]
+        async (
+            ClaimsPrincipal user,
+            HttpContext httpContext,
+            PawPrintsDbContext dbContext,
+            ILoggerFactory loggerFactory,
+            CancellationToken cancellationToken
+        ) =>
         {
-            meLogger.LogInformation(
-                "Current user profile load completed with outcome {Outcome} email {Email} collaboration role {CollaborationRole} owner profile email {OwnerProfileEmail}",
-                "NotPersistedYet",
-                email,
-                "owner",
-                null
+            var meLogger = loggerFactory.CreateLogger("PawPrints.Auth.Me");
+            var email = user.FindFirstValue(ClaimTypes.Email)!;
+            var storedUser = await dbContext.Users.AsNoTracking().SingleOrDefaultAsync(
+                candidate => candidate.Email == email,
+                cancellationToken
             );
-            return Results.Ok(new MeResponse(email, new CollaborationInfo("owner", null)));
-        }
 
-        if (storedUser.CollaboratesWithUserId is null)
-        {
-            meLogger.LogInformation(
-                "Current user profile load completed with outcome {Outcome} email {Email} collaboration role {CollaborationRole} owner profile email {OwnerProfileEmail}",
-                "Owner",
-                email,
-                "owner",
-                null
-            );
-            return Results.Ok(new MeResponse(email, new CollaborationInfo("owner", null)));
-        }
-
-        var owner = await dbContext.Users.AsNoTracking().SingleOrDefaultAsync(
-            candidate => candidate.Id == storedUser.CollaboratesWithUserId,
-            cancellationToken
-        );
-
-        meLogger.LogInformation(
-            "Current user profile load completed with outcome {Outcome} email {Email} collaboration role {CollaborationRole} owner profile email {OwnerProfileEmail}",
-            "Collaborator",
-            email,
-            "collaborator",
-            owner?.Email
-        );
-
-        return Results.Ok(new MeResponse(email, new CollaborationInfo("collaborator", owner?.Email)));
-    }
-    );
-
-    app.MapPost(
-    "/api/invites",
-    [Authorize(Policy = "AuthenticatedPawPrintsUser")]
-    async (
-        CurrentUser currentUser,
-        InviteService inviteService,
-        CancellationToken cancellationToken
-    ) =>
-    {
-        try
-        {
-            var created = await inviteService.CreateInviteAsync(currentUser.Email, cancellationToken);
-            if (created is null)
+            if (storedUser is null)
             {
-                return Results.Problem(
-                    title: "Profile not found.",
-                    detail: "Save your puppy log once before sharing it.",
-                    statusCode: StatusCodes.Status404NotFound
+                meLogger.LogInformation(
+                    "Current user profile load completed with outcome {Outcome} email {Email} collaboration role {CollaborationRole} owner profile email {OwnerProfileEmail} has cookie header {HasCookieHeader} origin {Origin} referer {Referer}",
+                    "NotPersistedYet",
+                    email,
+                    "owner",
+                    null,
+                    httpContext.Request.Headers.ContainsKey("Cookie"),
+                    httpContext.Request.Headers.Origin.ToString(),
+                    httpContext.Request.Headers.Referer.ToString()
                 );
+                return Results.Ok(new MeResponse(email, new CollaborationInfo("owner", null)));
             }
 
-            return Results.Created("/api/invites", created);
-        }
-        catch (InvalidOperationException exception)
-        {
-            return Results.Problem(
-                title: "Cannot create invite.",
-                detail: exception.Message,
-                statusCode: StatusCodes.Status403Forbidden
+            if (storedUser.CollaboratesWithUserId is null)
+            {
+                meLogger.LogInformation(
+                    "Current user profile load completed with outcome {Outcome} email {Email} collaboration role {CollaborationRole} owner profile email {OwnerProfileEmail} has cookie header {HasCookieHeader} origin {Origin} referer {Referer}",
+                    "Owner",
+                    email,
+                    "owner",
+                    null,
+                    httpContext.Request.Headers.ContainsKey("Cookie"),
+                    httpContext.Request.Headers.Origin.ToString(),
+                    httpContext.Request.Headers.Referer.ToString()
+                );
+                return Results.Ok(new MeResponse(email, new CollaborationInfo("owner", null)));
+            }
+
+            var owner = await dbContext.Users.AsNoTracking().SingleOrDefaultAsync(
+                candidate => candidate.Id == storedUser.CollaboratesWithUserId,
+                cancellationToken
             );
+
+            meLogger.LogInformation(
+                "Current user profile load completed with outcome {Outcome} email {Email} collaboration role {CollaborationRole} owner profile email {OwnerProfileEmail} has cookie header {HasCookieHeader} origin {Origin} referer {Referer}",
+                "Collaborator",
+                email,
+                "collaborator",
+                owner?.Email,
+                httpContext.Request.Headers.ContainsKey("Cookie"),
+                httpContext.Request.Headers.Origin.ToString(),
+                httpContext.Request.Headers.Referer.ToString()
+            );
+
+            return Results.Ok(new MeResponse(email, new CollaborationInfo("collaborator", owner?.Email)));
         }
-    }
     );
 
     app.MapPost(
-    "/api/invites/{token}/accept",
-    [Authorize(Policy = "AuthenticatedPawPrintsUser")]
-    async (
-        string token,
-        CurrentUser currentUser,
-        InviteService inviteService,
-        CancellationToken cancellationToken
-    ) =>
-    {
-        var outcome = await inviteService.AcceptInviteAsync(
-            token,
-            currentUser.Email,
-            currentUser.Subject,
-            cancellationToken
-        );
-
-        if (!outcome.Success)
+        "/api/invites",
+        [Authorize(Policy = AuthenticatedPawPrintsUserPolicy)]
+        async (
+            CurrentUser currentUser,
+            InviteService inviteService,
+            CancellationToken cancellationToken
+        ) =>
         {
-            return Results.Problem(title: "Invite cannot be accepted.", detail: outcome.Error, statusCode: outcome.StatusCode);
-        }
+            try
+            {
+                var created = await inviteService.CreateInviteAsync(currentUser.Email, cancellationToken);
+                if (created is null)
+                {
+                    return Results.Problem(
+                        title: "Profile not found.",
+                        detail: "Save your puppy log once before sharing it.",
+                        statusCode: StatusCodes.Status404NotFound
+                    );
+                }
 
-        return Results.NoContent();
-    }
+                return Results.Created("/api/invites", created);
+            }
+            catch (InvalidOperationException exception)
+            {
+                return Results.Problem(
+                    title: "Cannot create invite.",
+                    detail: exception.Message,
+                    statusCode: StatusCodes.Status403Forbidden
+                );
+            }
+        }
+    );
+
+    app.MapPost(
+        "/api/invites/{token}/accept",
+        [Authorize(Policy = AuthenticatedPawPrintsUserPolicy)]
+        async (
+            string token,
+            CurrentUser currentUser,
+            InviteService inviteService,
+            CancellationToken cancellationToken
+        ) =>
+        {
+            var outcome = await inviteService.AcceptInviteAsync(
+                token,
+                currentUser.Email,
+                currentUser.Subject,
+                cancellationToken
+            );
+
+            if (!outcome.Success)
+            {
+                return Results.Problem(title: "Invite cannot be accepted.", detail: outcome.Error, statusCode: outcome.StatusCode);
+            }
+
+            return Results.NoContent();
+        }
     );
 
     app.MapGet(
-    "/api/sync",
-    [Authorize(Policy = "AuthenticatedPawPrintsUser")]
-    async (
-        CurrentUser currentUser,
-        SnapshotSyncService syncService,
-        CancellationToken cancellationToken
-    ) =>
-    {
-        var snapshot = await syncService.GetSnapshotAsync(currentUser.Email, cancellationToken);
-        return snapshot is null ? Results.NoContent() : Results.Ok(snapshot);
-    }
+        "/api/sync",
+        [Authorize(Policy = AuthenticatedPawPrintsUserPolicy)]
+        async (
+            CurrentUser currentUser,
+            SnapshotSyncService syncService,
+            CancellationToken cancellationToken
+        ) =>
+        {
+            var snapshot = await syncService.GetSnapshotAsync(currentUser.Email, cancellationToken);
+            return snapshot is null ? Results.NoContent() : Results.Ok(snapshot);
+        }
     );
 
     app.MapPut(
-    "/api/sync",
-    [Authorize(Policy = "AuthenticatedPawPrintsUser")]
-    async (
-        SyncSnapshotRequest snapshot,
-        CurrentUser currentUser,
-        SnapshotSyncService syncService,
-        CancellationToken cancellationToken
-    ) =>
-    {
-        await syncService.SyncAsync(currentUser.Email, currentUser.Subject, snapshot, cancellationToken);
-        return Results.NoContent();
-    }
+        "/api/sync",
+        [Authorize(Policy = AuthenticatedPawPrintsUserPolicy)]
+        async (
+            SyncSnapshotRequest snapshot,
+            CurrentUser currentUser,
+            SnapshotSyncService syncService,
+            CancellationToken cancellationToken
+        ) =>
+        {
+            await syncService.SyncAsync(currentUser.Email, currentUser.Subject, snapshot, cancellationToken);
+            return Results.NoContent();
+        }
     );
+
+    // Serve SPA routes from the same host/App Service while keeping /api endpoints handled above.
+    app.MapFallbackToFile("index.html");
 
     app.Run();
 }
