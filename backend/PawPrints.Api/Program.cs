@@ -18,7 +18,7 @@ const string AuthenticatedPawPrintsUserPolicy = "AuthenticatedPawPrintsUser";
 Log.Logger = new LoggerConfiguration()
     .MinimumLevel.Information()
     .WriteTo.Console(new CompactJsonFormatter())
-    .CreateBootstrapLogger();
+    .CreateLogger();
 
 try
 {
@@ -31,7 +31,8 @@ try
                 .ReadFrom.Configuration(context.Configuration)
                 .ReadFrom.Services(services)
                 .Enrich.FromLogContext()
-                .WriteTo.Console(new CompactJsonFormatter()));
+                .WriteTo.Console(new CompactJsonFormatter()),
+        preserveStaticLogger: true);
 
     var isDevelopment = builder.Environment.IsDevelopment();
 
