@@ -14,8 +14,6 @@ public sealed class SnapshotSyncService(
         CancellationToken cancellationToken
     )
     {
-        logger.LogInformation("Loading PawPrints snapshot for {Email}.", email);
-
         var actor = await db.Users
             .AsNoTracking()
             .Include(storedUser => storedUser.Events)
@@ -23,11 +21,22 @@ public sealed class SnapshotSyncService(
 
         if (actor is null)
         {
-            logger.LogInformation("No PawPrints snapshot exists yet for {Email}.", email);
+            logger.LogInformation(
+                "Snapshot load completed with outcome {Outcome} email {Email} event count {EventCount} owner id {OwnerUserId} collaborator email {CollaboratorEmail}",
+                "NoProfile",
+                email,
+                0,
+                null,
+                null
+            );
             return null;
         }
 
         var dataUser = actor;
+        long? ownerIdUsed = null;
+        string? collaboratorEmail = null;
+        string outcome;
+
         if (actor.CollaboratesWithUserId is long ownerId)
         {
             var owner = await db.Users
@@ -36,27 +45,29 @@ public sealed class SnapshotSyncService(
                 .SingleOrDefaultAsync(storedUser => storedUser.Id == ownerId, cancellationToken);
             if (owner is null)
             {
-                logger.LogWarning(
-                    "Actor {Email} references missing owner id {OwnerId}; returning their own snapshot row.",
-                    email,
-                    ownerId
-                );
+                outcome = "MissingOwnerFallbackSelf";
+                ownerIdUsed = ownerId;
             }
             else
             {
+                outcome = "SharedFromOwner";
                 dataUser = owner;
-                logger.LogInformation(
-                    "Loading shared puppy log for collaborator {Email} from owner id {OwnerId}.",
-                    email,
-                    ownerId
-                );
+                ownerIdUsed = ownerId;
+                collaboratorEmail = email;
             }
+        }
+        else
+        {
+            outcome = "OwnerData";
         }
 
         logger.LogInformation(
-            "Loaded PawPrints snapshot for {Email}; returning {EventCount} events.",
-            email,
-            dataUser.Events.Count
+            "Snapshot load completed with outcome {Outcome} email {Email} event count {EventCount} owner id {OwnerUserId} collaborator email {CollaboratorEmail}",
+            outcome,
+            dataUser.Email,
+            dataUser.Events.Count,
+            ownerIdUsed,
+            collaboratorEmail
         );
 
         return new SyncSnapshotRequest(
@@ -83,12 +94,6 @@ public sealed class SnapshotSyncService(
         CancellationToken cancellationToken
     )
     {
-        logger.LogInformation(
-            "Syncing PawPrints snapshot for {Email} with {EventCount} events.",
-            email,
-            snapshot.Events.Count
-        );
-
         var arrivalDate = DateOnly.Parse(snapshot.Settings.ArrivalDate);
         var birthDate = DateOnly.Parse(snapshot.Settings.BirthDate);
         var now = DateTimeOffset.UtcNow;
@@ -123,9 +128,11 @@ public sealed class SnapshotSyncService(
             await db.SaveChangesAsync(cancellationToken);
 
             logger.LogInformation(
-                "Synced PawPrints snapshot for new owner {Email}; stored {EventCount} events.",
+                "Snapshot sync completed with outcome {Outcome} actor email {ActorEmail} events stored {EventCount} owner user id {OwnerUserId}",
+                "CreatedOwner",
                 email,
-                newOwner.Events.Count
+                newOwner.Events.Count,
+                newOwner.Id
             );
             return;
         }
@@ -152,9 +159,11 @@ public sealed class SnapshotSyncService(
             await db.SaveChangesAsync(cancellationToken);
 
             logger.LogInformation(
-                "Synced PawPrints snapshot for owner {Email}; stored {EventCount} events.",
+                "Snapshot sync completed with outcome {Outcome} actor email {ActorEmail} events stored {EventCount} owner user id {OwnerUserId}",
+                "UpdatedOwner",
                 email,
-                actor.Events.Count
+                actor.Events.Count,
+                actor.Id
             );
             return;
         }
@@ -166,9 +175,9 @@ public sealed class SnapshotSyncService(
         if (owner is null)
         {
             logger.LogWarning(
-                "Collaborator {Email} referenced missing owner id {OwnerId}; syncing as standalone owner row.",
-                email,
-                actor.CollaboratesWithUserId
+                "Snapshot sync reconciling missing owner id {OwnerId} for collaborator {ActorEmail}",
+                actor.CollaboratesWithUserId,
+                email
             );
 
             actor.CollaboratesWithUserId = null;
@@ -189,9 +198,11 @@ public sealed class SnapshotSyncService(
             await db.SaveChangesAsync(cancellationToken);
 
             logger.LogInformation(
-                "Synced PawPrints snapshot for recovered owner {Email}; stored {EventCount} events.",
+                "Snapshot sync completed with outcome {Outcome} actor email {ActorEmail} events stored {EventCount} owner user id {OwnerUserId}",
+                "RecoveredStandaloneOwner",
                 email,
-                actor.Events.Count
+                actor.Events.Count,
+                actor.Id
             );
             return;
         }
@@ -221,10 +232,11 @@ public sealed class SnapshotSyncService(
         await db.SaveChangesAsync(cancellationToken);
 
         logger.LogInformation(
-            "Synced PawPrints snapshot from collaborator {Email} onto owner id {OwnerId}; stored {EventCount} shared events.",
+            "Snapshot sync completed with outcome {Outcome} actor email {ActorEmail} events stored {EventCount} owner user id {OwnerUserId}",
+            "UpdatedSharedOwner",
             email,
-            owner.Id,
-            owner.Events.Count
+            owner.Events.Count,
+            owner.Id
         );
     }
 }
