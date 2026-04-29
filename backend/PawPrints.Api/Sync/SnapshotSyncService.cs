@@ -102,6 +102,10 @@ public sealed class SnapshotSyncService(
             .Include(storedUser => storedUser.Events)
             .SingleOrDefaultAsync(storedUser => storedUser.Email == email, cancellationToken);
 
+        var incomingUpserts = GetIncomingUpserts(snapshot);
+        var incomingDeletedEventIds = snapshot.DeletedEventIds ?? [];
+        var usesDeltaSync = snapshot.Upserts is not null || snapshot.DeletedEventIds is not null;
+
         if (actor is null)
         {
             var newOwner = new PawPrintsUser
@@ -114,7 +118,7 @@ public sealed class SnapshotSyncService(
                 UpdatedAt = now,
             };
             db.Users.Add(newOwner);
-            newOwner.Events = snapshot.Events
+            newOwner.Events = incomingUpserts
                 .Select(snapshotEvent => new PuppyEvent
                 {
                     ClientEventId = snapshotEvent.Id,
@@ -128,9 +132,11 @@ public sealed class SnapshotSyncService(
             await db.SaveChangesAsync(cancellationToken);
 
             logger.LogInformation(
-                "Snapshot sync completed with outcome {Outcome} actor email {ActorEmail} events stored {EventCount} owner user id {OwnerUserId}",
+                "Snapshot sync completed with outcome {Outcome} actor email {ActorEmail} upsert count {UpsertCount} delete count {DeleteCount} events stored {EventCount} owner user id {OwnerUserId}",
                 "CreatedOwner",
                 email,
+                incomingUpserts.Count,
+                incomingDeletedEventIds.Count,
                 newOwner.Events.Count,
                 newOwner.Id
             );
@@ -144,24 +150,16 @@ public sealed class SnapshotSyncService(
         {
             actor.ArrivalDate = arrivalDate;
             actor.BirthDate = birthDate;
-            db.Events.RemoveRange(actor.Events);
-            actor.Events = snapshot.Events
-                .Select(snapshotEvent => new PuppyEvent
-                {
-                    ClientEventId = snapshotEvent.Id,
-                    Type = snapshotEvent.Type,
-                    OccurredAt = snapshotEvent.OccurredAt,
-                    DateKey = DateOnly.Parse(snapshotEvent.DateKey),
-                    MetadataJson = snapshotEvent.Details?.GetRawText(),
-                })
-                .ToList();
+            ApplyEventChanges(actor, incomingUpserts, incomingDeletedEventIds, usesDeltaSync);
 
             await db.SaveChangesAsync(cancellationToken);
 
             logger.LogInformation(
-                "Snapshot sync completed with outcome {Outcome} actor email {ActorEmail} events stored {EventCount} owner user id {OwnerUserId}",
+                "Snapshot sync completed with outcome {Outcome} actor email {ActorEmail} upsert count {UpsertCount} delete count {DeleteCount} events stored {EventCount} owner user id {OwnerUserId}",
                 "UpdatedOwner",
                 email,
+                incomingUpserts.Count,
+                incomingDeletedEventIds.Count,
                 actor.Events.Count,
                 actor.Id
             );
@@ -183,24 +181,16 @@ public sealed class SnapshotSyncService(
             actor.CollaboratesWithUserId = null;
             actor.ArrivalDate = arrivalDate;
             actor.BirthDate = birthDate;
-            db.Events.RemoveRange(actor.Events);
-            actor.Events = snapshot.Events
-                .Select(snapshotEvent => new PuppyEvent
-                {
-                    ClientEventId = snapshotEvent.Id,
-                    Type = snapshotEvent.Type,
-                    OccurredAt = snapshotEvent.OccurredAt,
-                    DateKey = DateOnly.Parse(snapshotEvent.DateKey),
-                    MetadataJson = snapshotEvent.Details?.GetRawText(),
-                })
-                .ToList();
+            ApplyEventChanges(actor, incomingUpserts, incomingDeletedEventIds, usesDeltaSync);
 
             await db.SaveChangesAsync(cancellationToken);
 
             logger.LogInformation(
-                "Snapshot sync completed with outcome {Outcome} actor email {ActorEmail} events stored {EventCount} owner user id {OwnerUserId}",
+                "Snapshot sync completed with outcome {Outcome} actor email {ActorEmail} upsert count {UpsertCount} delete count {DeleteCount} events stored {EventCount} owner user id {OwnerUserId}",
                 "RecoveredStandaloneOwner",
                 email,
+                incomingUpserts.Count,
+                incomingDeletedEventIds.Count,
                 actor.Events.Count,
                 actor.Id
             );
@@ -210,18 +200,7 @@ public sealed class SnapshotSyncService(
         owner.ArrivalDate = arrivalDate;
         owner.BirthDate = birthDate;
         owner.UpdatedAt = now;
-        db.Events.RemoveRange(owner.Events);
-        owner.Events = snapshot.Events
-            .Select(snapshotEvent => new PuppyEvent
-            {
-                UserId = owner.Id,
-                ClientEventId = snapshotEvent.Id,
-                Type = snapshotEvent.Type,
-                OccurredAt = snapshotEvent.OccurredAt,
-                DateKey = DateOnly.Parse(snapshotEvent.DateKey),
-                MetadataJson = snapshotEvent.Details?.GetRawText(),
-            })
-            .ToList();
+        ApplyEventChanges(owner, incomingUpserts, incomingDeletedEventIds, usesDeltaSync);
 
         if (actor.Events.Count > 0)
         {
@@ -232,11 +211,83 @@ public sealed class SnapshotSyncService(
         await db.SaveChangesAsync(cancellationToken);
 
         logger.LogInformation(
-            "Snapshot sync completed with outcome {Outcome} actor email {ActorEmail} events stored {EventCount} owner user id {OwnerUserId}",
+            "Snapshot sync completed with outcome {Outcome} actor email {ActorEmail} upsert count {UpsertCount} delete count {DeleteCount} events stored {EventCount} owner user id {OwnerUserId}",
             "UpdatedSharedOwner",
             email,
+            incomingUpserts.Count,
+            incomingDeletedEventIds.Count,
             owner.Events.Count,
             owner.Id
         );
+    }
+
+    private static IReadOnlyCollection<SyncEventRequest> GetIncomingUpserts(SyncSnapshotRequest snapshot)
+    {
+        return snapshot.Upserts ?? snapshot.Events ?? [];
+    }
+
+    private void ApplyEventChanges(
+        PawPrintsUser user,
+        IReadOnlyCollection<SyncEventRequest> upserts,
+        IReadOnlyCollection<string> deletedEventIds,
+        bool useDeltaSync
+    )
+    {
+        if (!useDeltaSync)
+        {
+            db.Events.RemoveRange(user.Events);
+            user.Events = upserts
+                .Select(snapshotEvent => new PuppyEvent
+                {
+                    UserId = user.Id,
+                    ClientEventId = snapshotEvent.Id,
+                    Type = snapshotEvent.Type,
+                    OccurredAt = snapshotEvent.OccurredAt,
+                    DateKey = DateOnly.Parse(snapshotEvent.DateKey),
+                    MetadataJson = snapshotEvent.Details?.GetRawText(),
+                })
+                .ToList();
+            return;
+        }
+
+        var eventsByClientId = user.Events.ToDictionary(existing => existing.ClientEventId, StringComparer.Ordinal);
+
+        foreach (var upsert in upserts)
+        {
+            if (eventsByClientId.TryGetValue(upsert.Id, out var existing))
+            {
+                existing.Type = upsert.Type;
+                existing.OccurredAt = upsert.OccurredAt;
+                existing.DateKey = DateOnly.Parse(upsert.DateKey);
+                existing.MetadataJson = upsert.Details?.GetRawText();
+                continue;
+            }
+
+            user.Events.Add(new PuppyEvent
+            {
+                UserId = user.Id,
+                ClientEventId = upsert.Id,
+                Type = upsert.Type,
+                OccurredAt = upsert.OccurredAt,
+                DateKey = DateOnly.Parse(upsert.DateKey),
+                MetadataJson = upsert.Details?.GetRawText(),
+            });
+        }
+
+        if (deletedEventIds.Count == 0)
+        {
+            return;
+        }
+
+        var deletedIdSet = deletedEventIds.ToHashSet(StringComparer.Ordinal);
+        var toRemove = user.Events.Where(stored => deletedIdSet.Contains(stored.ClientEventId)).ToList();
+        if (toRemove.Count > 0)
+        {
+            db.Events.RemoveRange(toRemove);
+            foreach (var deleted in toRemove)
+            {
+                user.Events.Remove(deleted);
+            }
+        }
     }
 }

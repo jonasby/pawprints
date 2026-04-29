@@ -5,8 +5,10 @@ import {
   EVENT_TYPES,
   addEvent,
   addEventWithDefaults,
+  applyStoredEventsSnapshot,
   createEvent,
   formatTimeInputValue,
+  getPendingSyncChanges,
   getPuppyAgeLabel,
   getEventsForDate,
   getStorageKey,
@@ -14,7 +16,9 @@ import {
   getTodayKey,
   getTrackingDay,
   loadEventsForDate,
+  markSyncCommitted,
   replaceStoredEvents,
+  removeEvent,
   saveEventsForDate,
   updateEventsTime,
 } from "../src/events.js";
@@ -49,6 +53,7 @@ test("GivenAValidEventType_WhenCreatingAnEvent_ThenItIncludesDisplayMetadata", (
   assert.equal(event.type, "pee");
   assert.equal(event.occurredAt, "2026-04-26T07:00:00.000Z");
   assert.equal(event.dateKey, "2026-04-26");
+  assert.equal(event.committed, false);
   assert.match(event.id, /^1777186800000-pee-/);
 });
 
@@ -298,5 +303,99 @@ test("GivenRemoteEvents_WhenReplacingStoredEvents_ThenExistingPuppyEventsAreRepl
   assert.deepEqual(
     getStoredEvents(storage).map((event) => event.type),
     ["eat"],
+  );
+});
+
+test("GivenNewLocalEvents_WhenPreparingPendingChanges_ThenOnlyUncommittedEventsAreUpserted", () => {
+  const dateKey = "2026-04-26";
+  const committed = {
+    ...createEvent("sleep", new Date("2026-04-26T06:00:00.000Z")),
+    committed: true,
+  };
+  const pending = createEvent("pee", new Date("2026-04-26T07:00:00.000Z"));
+  const storage = createMemoryStorage({
+    [getStorageKey(dateKey)]: JSON.stringify([committed, pending]),
+  });
+
+  const pendingChanges = getPendingSyncChanges(storage);
+
+  assert.deepEqual(pendingChanges.deletedEventIds, []);
+  assert.deepEqual(pendingChanges.upserts.map((event) => event.id), [pending.id]);
+});
+
+test("GivenCommittedDeletion_WhenPreparingPendingChanges_ThenDeletedIdIsTracked", () => {
+  const date = new Date("2026-04-26T12:00:00");
+  const dateKey = "2026-04-26";
+  const committed = {
+    ...createEvent("sleep", new Date("2026-04-26T06:00:00.000Z")),
+    committed: true,
+  };
+  const storage = createMemoryStorage({
+    [getStorageKey(dateKey)]: JSON.stringify([committed]),
+  });
+
+  removeEvent(storage, committed.id, date);
+
+  const pendingChanges = getPendingSyncChanges(storage);
+  assert.deepEqual(pendingChanges.deletedEventIds, [committed.id]);
+});
+
+test("GivenPendingAndAcknowledgedChanges_WhenMarkingCommitted_ThenEventsAndDeletesAreCleared", () => {
+  const dateKey = "2026-04-26";
+  const pending = createEvent("pee", new Date("2026-04-26T07:00:00.000Z"));
+  const storage = createMemoryStorage({
+    [getStorageKey(dateKey)]: JSON.stringify([pending]),
+    "puppy-events:deleted": JSON.stringify(["deleted-1", "deleted-2"]),
+  });
+
+  markSyncCommitted(storage, { upsertIds: [pending.id], deletedEventIds: ["deleted-2"] });
+
+  const stored = loadEventsForDate(storage, dateKey);
+  assert.equal(stored[0].committed, true);
+  assert.deepEqual(getPendingSyncChanges(storage).deletedEventIds, ["deleted-1"]);
+});
+
+test("GivenRemoteSnapshotAndLocalPendingEdits_WhenApplyingSnapshot_ThenPendingEditsArePreserved", () => {
+  const localPending = {
+    id: "evt-local",
+    type: "eat",
+    occurredAt: "2026-04-26T10:00:00.000Z",
+    dateKey: "2026-04-26",
+    committed: false,
+  };
+  const localCommitted = {
+    id: "evt-committed",
+    type: "sleep",
+    occurredAt: "2026-04-26T08:00:00.000Z",
+    dateKey: "2026-04-26",
+    committed: true,
+  };
+  const storage = createMemoryStorage({
+    [getStorageKey("2026-04-26")]: JSON.stringify([localPending, localCommitted]),
+  });
+
+  applyStoredEventsSnapshot(storage, [
+    {
+      id: "evt-committed",
+      type: "wake",
+      occurredAt: "2026-04-26T09:00:00.000Z",
+      dateKey: "2026-04-26",
+    },
+    {
+      id: "evt-remote",
+      type: "poop",
+      occurredAt: "2026-04-26T11:00:00.000Z",
+      dateKey: "2026-04-26",
+    },
+  ]);
+
+  const events = getStoredEvents(storage);
+  assert.deepEqual(
+    events.map((event) => ({ id: event.id, type: event.type, committed: event.committed })),
+    [
+      { id: "evt-remote", type: "poop", committed: true },
+      { id: "evt-local", type: "eat", committed: false },
+      { id: "evt-committed", type: "wake", committed: true },
+    ],
   );
 });

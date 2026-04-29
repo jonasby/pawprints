@@ -8,6 +8,7 @@ export const EVENT_TYPES = [
 ];
 
 const STORAGE_PREFIX = "puppy-events";
+const DELETED_EVENT_IDS_KEY = `${STORAGE_PREFIX}:deleted`;
 const TEN_MINUTES_IN_MS = 10 * 60 * 1000;
 const ONE_HOUR_IN_MS = 60 * 60 * 1000;
 const SLEEPING_EVENT_TYPES = new Set(["nap", "sleep"]);
@@ -40,7 +41,7 @@ export function getStoredDateKeys(storage) {
 
   for (let index = 0; index < storage.length; index += 1) {
     const key = storage.key(index);
-    if (key?.startsWith(`${STORAGE_PREFIX}:`)) {
+    if (key?.startsWith(`${STORAGE_PREFIX}:`) && key !== DELETED_EVENT_IDS_KEY) {
       dateKeys.push(key.slice(STORAGE_PREFIX.length + 1));
     }
   }
@@ -188,6 +189,17 @@ export function createEvent(eventTypeId, occurredAt = new Date()) {
     type: eventTypeId,
     occurredAt: occurredAt.toISOString(),
     dateKey: getTodayKey(occurredAt),
+    committed: false,
+  };
+}
+
+function normalizeEvent(event) {
+  return {
+    id: event.id,
+    type: event.type,
+    occurredAt: event.occurredAt,
+    dateKey: event.dateKey,
+    committed: event.committed !== false,
   };
 }
 
@@ -201,9 +213,11 @@ export function loadEventsForDate(storage, dateKey = getTodayKey()) {
   try {
     const events = JSON.parse(rawEvents);
     return Array.isArray(events)
-      ? events.slice().sort((first, second) => {
+      ? events
+          .map(normalizeEvent)
+          .sort((first, second) => {
           return new Date(second.occurredAt) - new Date(first.occurredAt);
-        })
+          })
       : [];
   } catch {
     return [];
@@ -212,6 +226,29 @@ export function loadEventsForDate(storage, dateKey = getTodayKey()) {
 
 export function saveEventsForDate(storage, dateKey, events) {
   storage.setItem(getStorageKey(dateKey), JSON.stringify(events));
+}
+
+function loadDeletedEventIds(storage) {
+  const raw = storage.getItem(DELETED_EVENT_IDS_KEY);
+  if (!raw) {
+    return [];
+  }
+
+  try {
+    const deletedEventIds = JSON.parse(raw);
+    return Array.isArray(deletedEventIds) ? deletedEventIds.filter((id) => typeof id === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveDeletedEventIds(storage, deletedEventIds) {
+  if (!deletedEventIds.length) {
+    storage.removeItem(DELETED_EVENT_IDS_KEY);
+    return;
+  }
+
+  storage.setItem(DELETED_EVENT_IDS_KEY, JSON.stringify(Array.from(new Set(deletedEventIds))));
 }
 
 export function getEventsForDate(storage, date = new Date()) {
@@ -244,15 +281,35 @@ export function replaceStoredEvents(storage, events) {
 }
 
 export function applyStoredEventsSnapshot(storage, events = []) {
-  replaceStoredEvents(
-    storage,
-    events.map((event) => ({
+  const localEvents = getStoredEvents(storage);
+  const localById = new Map(localEvents.map((event) => [event.id, event]));
+  const mergedEvents = [];
+  const remoteIds = new Set();
+
+  events.forEach((event) => {
+    remoteIds.add(event.id);
+    const local = localById.get(event.id);
+    if (local && local.committed === false) {
+      mergedEvents.push(local);
+      return;
+    }
+
+    mergedEvents.push({
       id: event.id,
       type: event.type,
       occurredAt: event.occurredAt,
       dateKey: event.dateKey,
-    })),
-  );
+      committed: true,
+    });
+  });
+
+  localEvents.forEach((local) => {
+    if (local.committed === false && !remoteIds.has(local.id)) {
+      mergedEvents.push(local);
+    }
+  });
+
+  replaceStoredEvents(storage, mergedEvents);
 }
 
 export function addEvent(storage, event) {
@@ -324,6 +381,7 @@ export function updateEventsTime(storage, eventIds, timeValue, date = new Date()
       ...event,
       occurredAt: updatedAt.toISOString(),
       dateKey,
+      committed: false,
     };
   });
 
@@ -334,15 +392,51 @@ export function updateEventsTime(storage, eventIds, timeValue, date = new Date()
 
 export function removeEvent(storage, eventId, date = new Date()) {
   const dateKey = getTodayKey(date);
+  const deletedEvent = loadEventsForDate(storage, dateKey).find((event) => event.id === eventId);
   const remainingEvents = loadEventsForDate(storage, dateKey).filter((event) => {
     return event.id !== eventId;
   });
 
   saveEventsForDate(storage, dateKey, remainingEvents);
+  if (deletedEvent && deletedEvent.committed !== false) {
+    saveDeletedEventIds(storage, [...loadDeletedEventIds(storage), eventId]);
+  }
 
   return remainingEvents;
 }
 
 export function clearEventsForDate(storage, date = new Date()) {
   saveEventsForDate(storage, getTodayKey(date), []);
+}
+
+export function getPendingSyncChanges(storage) {
+  return {
+    upserts: getStoredEvents(storage)
+      .filter((event) => event.committed === false)
+      .map((event) => ({
+        id: event.id,
+        type: event.type,
+        occurredAt: event.occurredAt,
+        dateKey: event.dateKey,
+      })),
+    deletedEventIds: loadDeletedEventIds(storage),
+  };
+}
+
+export function markSyncCommitted(storage, { upsertIds = [], deletedEventIds = [] } = {}) {
+  if (upsertIds.length) {
+    const committedIds = new Set(upsertIds);
+    const events = getStoredEvents(storage).map((event) =>
+      committedIds.has(event.id) ? { ...event, committed: true } : event,
+    );
+    replaceStoredEvents(storage, events);
+  }
+
+  if (deletedEventIds.length) {
+    const acknowledgedDeletes = new Set(deletedEventIds);
+    saveDeletedEventIds(
+      storage,
+      loadDeletedEventIds(storage).filter((id) => !acknowledgedDeletes.has(id)),
+    );
+  }
 }

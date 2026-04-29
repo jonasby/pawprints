@@ -68,6 +68,22 @@ button {
   text-transform: uppercase;
 }
 
+.sync-status.is-saving::after {
+  content: " ·";
+  display: inline-block;
+  animation: sync-pulse 1s ease-in-out infinite;
+}
+
+@keyframes sync-pulse {
+  0%,
+  100% {
+    opacity: 0.2;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
 h1,
 h2,
 p {
@@ -311,11 +327,33 @@ h2 {
   right: 18px;
 }
 
+.auth-bar.is-syncing {
+  opacity: 0.7;
+}
+
+.auth-bar.is-syncing .primary-link {
+  filter: saturate(0.85);
+}
+
 .login-facade .sync-status {
   min-height: 1.1rem;
   margin-top: 10px;
   letter-spacing: 0;
   text-transform: none;
+}
+
+.sync-status.is-in-flight {
+  opacity: 0.72;
+  animation: subtle-pulse 0.9s ease-in-out infinite alternate;
+}
+
+@keyframes subtle-pulse {
+  from {
+    opacity: 0.58;
+  }
+  to {
+    opacity: 0.9;
+  }
 }
 
 .login-facade {

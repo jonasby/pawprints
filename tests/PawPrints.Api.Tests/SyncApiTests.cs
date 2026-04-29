@@ -127,6 +127,62 @@ public sealed class SyncApiTests
         );
     }
 
+    [Fact]
+    public async Task GivenStoredEvents_WhenSyncingDeltaUpserts_ThenOnlyTargetedEventsAreUpdated()
+    {
+        await using var application = new PawPrintsApiApplication();
+        using var client = application.CreateAuthenticatedClient("jon.asby@gmail.com");
+        await client.PutAsJsonAsync("/api/sync", CreateSnapshot());
+
+        var delta = new SyncSnapshotRequest(
+            new SyncSettingsRequest("2026-04-19", "2026-02-22"),
+            Upserts:
+            [
+                new SyncEventRequest("evt-wake", "wake", DateTimeOffset.Parse("2026-04-26T07:20:00Z"), "2026-04-26"),
+                new SyncEventRequest("evt-food", "eat", DateTimeOffset.Parse("2026-04-26T08:00:00Z"), "2026-04-26"),
+            ]
+        );
+
+        var response = await client.PutAsJsonAsync("/api/sync", delta);
+        response.EnsureSuccessStatusCode();
+
+        using var scope = application.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<PawPrintsDbContext>();
+        var user = await db.Users.Include(storedUser => storedUser.Events).SingleAsync();
+
+        Assert.Contains(user.Events, stored => stored.ClientEventId == "evt-sleep");
+        Assert.Contains(
+            user.Events,
+            stored => stored.ClientEventId == "evt-wake"
+                      && stored.OccurredAt == DateTimeOffset.Parse("2026-04-26T07:20:00Z")
+        );
+        Assert.Contains(user.Events, stored => stored.ClientEventId == "evt-food" && stored.Type == "eat");
+    }
+
+    [Fact]
+    public async Task GivenStoredEvents_WhenSyncingDeltaDeletes_ThenOnlyTargetedEventsAreRemoved()
+    {
+        await using var application = new PawPrintsApiApplication();
+        using var client = application.CreateAuthenticatedClient("jon.asby@gmail.com");
+        await client.PutAsJsonAsync("/api/sync", CreateSnapshot());
+
+        var delta = new SyncSnapshotRequest(
+            new SyncSettingsRequest("2026-04-19", "2026-02-22"),
+            DeletedEventIds: ["evt-sleep"]
+        );
+
+        var response = await client.PutAsJsonAsync("/api/sync", delta);
+        response.EnsureSuccessStatusCode();
+
+        using var scope = application.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<PawPrintsDbContext>();
+        var user = await db.Users.Include(storedUser => storedUser.Events).SingleAsync();
+
+        Assert.DoesNotContain(user.Events, stored => stored.ClientEventId == "evt-sleep");
+        Assert.Contains(user.Events, stored => stored.ClientEventId == "evt-wake");
+        Assert.Contains(user.Events, stored => stored.ClientEventId == "evt-pee");
+    }
+
     private static SyncSnapshotRequest CreateSnapshot(params SyncEventRequest[] events)
     {
         var snapshotEvents = events.Length > 0
