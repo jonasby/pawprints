@@ -5,12 +5,10 @@ using Microsoft.AspNetCore.Authentication.Google;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.EntityFrameworkCore;
 using PawPrints.Api;
-using PawPrints.Api.Contracts;
 using PawPrints.Api.Data;
 using PawPrints.Api.Import;
 using PawPrints.Api.Invites;
 using PawPrints.Api.Middleware;
-using PawPrints.Api.Sync;
 using Serilog;
 using Serilog.Formatting.Compact;
 
@@ -18,7 +16,7 @@ const string AuthenticatedPawPrintsUserPolicy = "AuthenticatedPawPrintsUser";
 
 Log.Logger = new LoggerConfiguration()
     .MinimumLevel.Information()
-    .WriteTo.Console(new CompactJsonFormatter())
+    .WriteTo.Console(new RenderedCompactJsonFormatter())
     .CreateLogger();
 
 try
@@ -32,7 +30,7 @@ try
                 .ReadFrom.Configuration(context.Configuration)
                 .ReadFrom.Services(services)
                 .Enrich.FromLogContext()
-                .WriteTo.Console(new CompactJsonFormatter()),
+                .WriteTo.Console(new RenderedCompactJsonFormatter()),
         preserveStaticLogger: true);
 
     var isDevelopment = builder.Environment.IsDevelopment();
