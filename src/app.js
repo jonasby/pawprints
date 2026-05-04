@@ -277,6 +277,18 @@ function createSessionOutcomeError(session) {
   return error;
 }
 
+function isExpiredSessionOutcome(session) {
+  if (!session) {
+    return false;
+  }
+
+  if (session.reason === "unauthorized") {
+    return true;
+  }
+
+  return session.status === 401 || session.status === 403;
+}
+
 export function renderPuppyLog() {
   const eventButtons = document.querySelector("[data-event-buttons]");
   const eventList = document.querySelector("[data-event-list]");
@@ -625,8 +637,15 @@ export function renderPuppyLog() {
             syncStatus.textContent = "Sign-in did not complete. See details below.";
           }
         } else if (hadSignedInBefore) {
-          if (syncStatus) {
-            syncStatus.textContent = "Session expired. Please sign in again.";
+          if (isExpiredSessionOutcome(session)) {
+            if (syncStatus) {
+              syncStatus.textContent = "Session expired. Please sign in again.";
+            }
+          } else {
+            bootstrapError = createSessionOutcomeError(session);
+            if (syncStatus) {
+              syncStatus.textContent = "We could not verify your session. See details below.";
+            }
           }
         } else if (syncStatus) {
           syncStatus.textContent = "Sign in to sync your puppy log.";
