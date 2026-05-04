@@ -23,6 +23,7 @@ const dateFormatter = new Intl.DateTimeFormat(undefined, {
 
 const SETTINGS_KEY = "pawprints-settings";
 const HAS_SIGNED_IN_KEY = "pawprints-has-signed-in";
+const AUTH_RETURN_QUERY_KEY = "authReturn";
 
 const defaultSettings = {
   arrivalDate: "",
@@ -64,14 +65,32 @@ function readInviteTokenFromLocation() {
   }
 }
 
-function stripInviteQueryParam() {
+function hasAuthReturnFlagInLocation() {
+  try {
+    return new URLSearchParams(window.location.search).get(AUTH_RETURN_QUERY_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function createLoginReturnUrl() {
   try {
     const url = new URL(window.location.href);
-    if (!url.searchParams.has("invite")) {
+    url.searchParams.set(AUTH_RETURN_QUERY_KEY, "1");
+    return url.toString();
+  } catch {
+    return window.location.href;
+  }
+}
+
+function stripQueryParam(paramName) {
+  try {
+    const url = new URL(window.location.href);
+    if (!url.searchParams.has(paramName)) {
       return;
     }
 
-    url.searchParams.delete("invite");
+    url.searchParams.delete(paramName);
     const search = url.searchParams.toString();
     window.history.replaceState({}, "", `${url.pathname}${search ? `?${search}` : ""}${url.hash}`);
   } catch {
@@ -213,6 +232,10 @@ function formatBootstrapError(error) {
     `Message: ${error?.message ?? "Unknown bootstrap error"}`,
   ];
 
+  if (error?.phase) {
+    lines.push(`Auth phase: ${error.phase}`);
+  }
+
   if (error?.path) {
     lines.push(`API path: ${error.path}`);
   }
@@ -228,6 +251,30 @@ function formatBootstrapError(error) {
   }
 
   return lines.join("\n");
+}
+
+function createSessionOutcomeError(session) {
+  if (session?.error) {
+    const baseError = session.error;
+    if (!baseError.phase) {
+      baseError.phase = "session-check";
+    }
+    return baseError;
+  }
+
+  if (session?.reason === "unauthorized") {
+    const status = typeof session.status === "number" ? session.status : 401;
+    const error = new Error("No active signed-in session found.");
+    error.status = status;
+    error.path = session.path ?? "/api/auth/me";
+    error.phase = "session-check";
+    return error;
+  }
+
+  const error = new Error("Session validation returned an unexpected result.");
+  error.path = session?.path ?? "/api/auth/me";
+  error.phase = "session-check";
+  return error;
 }
 
 export function renderPuppyLog() {
@@ -268,6 +315,7 @@ export function renderPuppyLog() {
   const todayKey = getTodayKey();
   let isSignedIn = false;
   let isBootstrapping = false;
+  let isCheckingSession = false;
   let bootstrapError = null;
   let accountProfile = null;
   if (syncStatus) {
@@ -296,7 +344,7 @@ export function renderPuppyLog() {
 
     const url = new URL(createApiUrl(path), window.location.href);
     if (path === "/api/auth/login") {
-      url.searchParams.set("returnUrl", window.location.href);
+      url.searchParams.set("returnUrl", createLoginReturnUrl());
     }
 
     if (element.tagName === "FORM") {
@@ -327,13 +375,17 @@ export function renderPuppyLog() {
       : "PawPrints could not load your account snapshot.";
     bootHelp.hidden = !bootstrapError;
     bootHelp.textContent = bootstrapError
-      ? "Authentication did not complete or snapshot loading failed. Retry sign-in in a regular browser tab, then retry loading."
+      ? "Sign-in or snapshot loading did not complete. Review the details, then sign in again and retry."
       : "";
     bootErrorDetails.hidden = !bootstrapError;
     bootErrorDetails.textContent = bootstrapError ? formatBootstrapError(bootstrapError) : "";
     bootRetryButton.hidden = !bootstrapError;
     if (bootLoginLink) {
       bootLoginLink.hidden = !bootstrapError;
+    }
+
+    if (syncStatus) {
+      syncStatus.classList.toggle("is-loading", isCheckingSession || isBootstrapping);
     }
 
     loginPanel.hidden = isSignedIn || showBootPanel;
@@ -543,47 +595,64 @@ export function renderPuppyLog() {
 
     try {
       const inviteToken = readInviteTokenFromLocation();
-      const user = await remoteSync.getCurrentUser({ silent: true });
-      accountProfile = user;
-      isSignedIn = Boolean(user);
+      const authReturnAttempted = hasAuthReturnFlagInLocation();
+      const hadSignedInBefore = hasSignedInBefore();
+      const shouldCheckSession = Boolean(inviteToken || authReturnAttempted || hadSignedInBefore);
 
-      if (!isSignedIn) {
-        if (inviteToken) {
-          bootstrapError = {
-            message:
-              "Invite sign-in did not complete. Please tap 'Sign in with Google' again in a regular browser tab (not in-app browser) and return to this invite link.",
-            status: 401,
-            path: "/api/auth/me",
-          };
-          if (syncStatus) {
-            syncStatus.textContent = "Invite sign-in failed. Retry in a browser tab.";
-          }
-        } else if (hasSignedInBefore()) {
-          bootstrapError = {
-            message:
-              "We couldn't restore your signed-in session. Sign in again to continue syncing your puppy log.",
-            status: 401,
-            path: "/api/auth/me",
-          };
-          if (syncStatus) {
-            syncStatus.textContent = "Session expired. Sign in again.";
-          }
-        } else if (syncStatus) {
-          bootstrapError = null;
-          syncStatus.textContent = "";
+      if (!shouldCheckSession) {
+        isSignedIn = false;
+        accountProfile = null;
+        if (syncStatus) {
+          syncStatus.textContent = "Sign in to sync your puppy log.";
         }
         renderState();
         return;
       }
+
+      isCheckingSession = true;
+      if (syncStatus) {
+        syncStatus.textContent = "Checking your session...";
+      }
+      renderState();
+
+      const session = await remoteSync.checkSession();
+      if (!session.isActive) {
+        isSignedIn = false;
+        accountProfile = null;
+        if (authReturnAttempted || inviteToken) {
+          bootstrapError = createSessionOutcomeError(session);
+          if (syncStatus) {
+            syncStatus.textContent = "Sign-in did not complete. See details below.";
+          }
+        } else if (hadSignedInBefore) {
+          if (syncStatus) {
+            syncStatus.textContent = "Session expired. Please sign in again.";
+          }
+        } else if (syncStatus) {
+          syncStatus.textContent = "Sign in to sync your puppy log.";
+        }
+        renderState();
+        return;
+      }
+
+      accountProfile = session.user;
+      isSignedIn = true;
       markSignedIn();
+      if (authReturnAttempted) {
+        stripQueryParam(AUTH_RETURN_QUERY_KEY);
+      }
 
       if (inviteToken) {
         try {
           await remoteSync.acceptInvite(inviteToken);
-          stripInviteQueryParam();
+          stripQueryParam("invite");
+          stripQueryParam(AUTH_RETURN_QUERY_KEY);
           accountProfile = await remoteSync.getCurrentUser({ silent: true });
         } catch (inviteError) {
           console.error(inviteError);
+          if (!inviteError.phase) {
+            inviteError.phase = "invite-accept";
+          }
           bootstrapError = inviteError;
           renderState();
           return;
@@ -601,13 +670,20 @@ export function renderPuppyLog() {
         }
       } catch (snapshotError) {
         console.error(snapshotError);
+        if (!snapshotError.phase) {
+          snapshotError.phase = "snapshot-load";
+        }
         bootstrapError = snapshotError;
       }
     } catch (error) {
       console.error(error);
+      if (!error.phase) {
+        error.phase = "bootstrap";
+      }
       bootstrapError = error;
       isSignedIn = false;
     } finally {
+      isCheckingSession = false;
       isBootstrapping = false;
       renderState();
     }

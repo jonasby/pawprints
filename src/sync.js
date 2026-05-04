@@ -15,6 +15,18 @@ export function createLoginUrl(returnUrl = window.location.href) {
   return loginUrl.toString();
 }
 
+function createNetworkError(path, cause) {
+  const error = new Error(`PawPrints could not reach ${path}`);
+  error.path = path;
+  if (cause instanceof Error) {
+    error.cause = cause;
+    if (cause.message) {
+      error.message = `${error.message}: ${cause.message}`;
+    }
+  }
+  return error;
+}
+
 async function createApiError(response, path) {
   let responseText = "";
   try {
@@ -35,6 +47,7 @@ export function createRemoteSync(
   { getSettings, loadEvents, getPendingChanges, markChangesCommitted, onStatusChange, onInFlightChange },
 ) {
   let pendingSyncId;
+  const authPath = "/api/auth/me";
 
   async function syncNow() {
     const settings = getSettings();
@@ -95,33 +108,64 @@ export function createRemoteSync(
         });
       }, SYNC_DEBOUNCE_MS);
     },
-    async getCurrentUser(options = {}) {
-      const silent = options.silent === true;
+    async checkSession() {
       try {
-        const response = await fetch(createApiUrl("/api/auth/me"), { credentials: "include" });
+        const response = await fetch(createApiUrl(authPath), { credentials: "include" });
+        if (response.status === 401 || response.status === 403) {
+          return {
+            isActive: false,
+            status: response.status,
+            path: authPath,
+            reason: "unauthorized",
+          };
+        }
+
         if (!response.ok) {
-          if (!silent) {
-            onStatusChange?.("Sign in to sync");
-          }
-          return null;
+          return {
+            isActive: false,
+            status: response.status,
+            path: authPath,
+            reason: "http-error",
+            error: await createApiError(response, authPath),
+          };
         }
 
         const user = await response.json();
         if (!user || typeof user.email !== "string" || user.email.length === 0) {
-          if (!silent) {
-            onStatusChange?.("Sign in to sync");
-          }
-          return null;
+          return {
+            isActive: false,
+            path: authPath,
+            reason: "invalid-user",
+            error: new Error("Authenticated session returned an invalid account profile."),
+          };
         }
 
+        return {
+          isActive: true,
+          user,
+        };
+      } catch (error) {
+        return {
+          isActive: false,
+          path: authPath,
+          reason: "network-error",
+          error: createNetworkError(authPath, error),
+        };
+      }
+    },
+    async getCurrentUser(options = {}) {
+      const silent = options.silent === true;
+      const session = await this.checkSession();
+      if (session.isActive) {
+        const { user } = session;
         onStatusChange?.("Signed in");
         return user;
-      } catch {
-        if (!silent) {
-          onStatusChange?.("Offline");
-        }
-        return null;
       }
+
+      if (!silent) {
+        onStatusChange?.(session.reason === "network-error" ? "Offline" : "Sign in to sync");
+      }
+      return null;
     },
     async loadSnapshot() {
       const path = "/api/sync";

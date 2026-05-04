@@ -153,18 +153,18 @@ test("GivenANapWasThePreviousEvent_WhenAddingWake_ThenItDefaultsToOneHourLater",
 
 test("GivenASuggestedEventWouldBeInTheFuture_WhenAddingIt_ThenItIsCappedAtNow", () => {
   const todayKey = "2026-04-26";
-  const nap = createEvent("nap", new Date("2026-04-26T22:50:00.000Z"));
+  const nap = createEvent("nap", new Date(2026, 3, 26, 22, 50));
   const storage = createMemoryStorage({
     [getStorageKey(todayKey)]: JSON.stringify([nap]),
   });
 
-  addEventWithDefaults(storage, "wake", new Date("2026-04-26T23:40:00.000Z"));
+  addEventWithDefaults(storage, "wake", new Date(2026, 3, 26, 23, 40), new Date(2026, 3, 26));
 
   assert.deepEqual(
     loadEventsForDate(storage, todayKey).map((event) => [event.type, event.occurredAt]),
     [
-      ["wake", "2026-04-26T23:40:00.000Z"],
-      ["nap", "2026-04-26T22:50:00.000Z"],
+      ["wake", new Date(2026, 3, 26, 23, 40).toISOString()],
+      [nap.type, nap.occurredAt],
     ],
   );
 });
