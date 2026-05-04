@@ -7,6 +7,7 @@ using Microsoft.EntityFrameworkCore;
 using PawPrints.Api;
 using PawPrints.Api.Contracts;
 using PawPrints.Api.Data;
+using PawPrints.Api.Import;
 using PawPrints.Api.Invites;
 using PawPrints.Api.Middleware;
 using PawPrints.Api.Sync;
@@ -42,6 +43,7 @@ try
     builder.Services.AddScoped<CurrentUser>();
     builder.Services.AddScoped<SnapshotSyncService>();
     builder.Services.AddScoped<InviteService>();
+    builder.Services.AddHttpClient<ImportTokenResolveService>();
     builder.Services.AddCors(options =>
     {
         options.AddPolicy("Frontend", policy =>
@@ -448,6 +450,20 @@ try
         {
             await syncService.SyncAsync(currentUser.Email, currentUser.Subject, snapshot, cancellationToken);
             return Results.NoContent();
+        }
+    );
+
+    app.MapPost(
+        "/api/import/resolve-tokens",
+        [Authorize(Policy = AuthenticatedPawPrintsUserPolicy)]
+        async (
+            ImportResolveTokensRequest request,
+            ImportTokenResolveService resolver,
+            CancellationToken cancellationToken
+        ) =>
+        {
+            var response = await resolver.ResolveAsync(request, cancellationToken);
+            return Results.Ok(response);
         }
     );
 

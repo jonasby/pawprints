@@ -99,6 +99,27 @@
               <p class="share-status" data-share-status aria-live="polite"></p>
             </div>
           </div>
+          <div class="import-panel" data-import-section hidden>
+            <p class="import-heading">Import from notes</p>
+            <p class="import-hint">
+              One line per time (24h clock), e.g.
+              <code>0700 wake + wee + poo</code>. Emojis are ignored for matching. Synonyms like wee/pee are
+              recognised; unknown phrases become custom event types (stored in this browser).
+            </p>
+            <label class="field import-field">
+              <span>Paste log</span>
+              <textarea class="import-textarea" rows="8" data-import-text placeholder="2230 sleep&#10;0500 wee + poo"></textarea>
+            </label>
+            <div class="import-actions">
+              <button class="muted-button" type="button" data-import-preview>Preview</button>
+              <button class="muted-button" type="button" data-import-ai hidden>Refine with AI</button>
+              <button class="primary-link import-apply" type="button" data-import-apply disabled>
+                Import to this day
+              </button>
+            </div>
+            <p class="import-status" data-import-status aria-live="polite"></p>
+            <div class="import-preview-out" data-import-preview-out hidden></div>
+          </div>
         </details>
       </section>
 

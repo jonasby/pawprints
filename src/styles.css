@@ -197,6 +197,100 @@ h2 {
   border-top: 1px dashed #fed7aa;
 }
 
+.import-panel {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px dashed #fed7aa;
+}
+
+.import-heading {
+  margin: 0 0 6px;
+  font-size: 0.92rem;
+  font-weight: 850;
+  color: #5c4334;
+}
+
+.import-hint {
+  margin: 0 0 10px;
+  color: #7c5a45;
+  font-size: 0.88rem;
+}
+
+.import-hint code {
+  font-size: 0.85em;
+  padding: 2px 6px;
+  border-radius: 6px;
+  background: #fff;
+  border: 1px solid #fed7aa;
+}
+
+.import-field {
+  margin-bottom: 10px;
+}
+
+.import-textarea {
+  width: 100%;
+  min-height: 10rem;
+  resize: vertical;
+  border: 1px solid #fed7aa;
+  border-radius: 10px;
+  padding: 10px;
+  color: #2f241d;
+  background: #fff;
+  font-family: ui-monospace, "Cascadia Code", "Segoe UI Mono", monospace;
+  font-size: 0.85rem;
+}
+
+.import-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+}
+
+.import-apply:disabled {
+  opacity: 0.45;
+  pointer-events: none;
+}
+
+.import-status {
+  margin: 8px 0 0;
+  min-height: 1rem;
+  color: #9a5a20;
+  font-size: 0.85rem;
+}
+
+.import-preview-out {
+  margin-top: 10px;
+}
+
+.import-errors {
+  margin: 0;
+  padding-left: 1.2rem;
+  color: #c2410c;
+  font-size: 0.85rem;
+}
+
+.import-preview-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.82rem;
+  color: #5c4334;
+}
+
+.import-preview-table th,
+.import-preview-table td {
+  border: 1px solid #fed7aa;
+  padding: 6px 8px;
+  vertical-align: top;
+  text-align: left;
+}
+
+.import-preview-table th {
+  background: #fffaf3;
+  font-weight: 750;
+}
+
 .share-heading {
   margin: 0 0 6px;
   font-size: 0.92rem;

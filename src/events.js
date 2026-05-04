@@ -26,6 +26,93 @@ export function getEventType(eventTypeId) {
   return EVENT_TYPES.find((eventType) => eventType.id === eventTypeId);
 }
 
+/**
+ * @typedef {{ id: string; label: string; emoji: string }} CustomEventType
+ * @typedef {{ arrivalDate: string; birthDate: string; customEventTypes?: CustomEventType[] }} PawPrintsSettings
+ */
+
+export function humanizeTypeId(typeId) {
+  if (!typeId) {
+    return "Event";
+  }
+
+  return typeId
+    .replace(/-/g, " ")
+    .replace(/\b\w/g, (character) => character.toUpperCase());
+}
+
+export function normalizeEventTypeSlug(raw) {
+  if (typeof raw !== "string") {
+    return "";
+  }
+
+  return raw
+    .toLowerCase()
+    .trim()
+    .replace(/\s+/g, "-")
+    .replace(/[^a-z0-9-]/g, "")
+    .slice(0, 40);
+}
+
+/**
+ * @param {string} typeId
+ * @param {PawPrintsSettings} [settings]
+ */
+export function getResolvedEventType(typeId, settings = {}) {
+  const builtIn = getEventType(typeId);
+  if (builtIn) {
+    return builtIn;
+  }
+
+  const custom = (settings.customEventTypes ?? []).find((entry) => entry.id === typeId);
+  if (custom) {
+    return { id: custom.id, label: custom.label, emoji: custom.emoji };
+  }
+
+  return {
+    id: typeId,
+    label: humanizeTypeId(typeId),
+    emoji: "·",
+  };
+}
+
+/**
+ * @param {PawPrintsSettings} settings
+ * @param {{ id: string; label: string; emoji: string }} custom
+ */
+export function registerCustomEventType(settings, custom) {
+  const slug = normalizeEventTypeSlug(custom.id);
+  if (!slug) {
+    return;
+  }
+
+  if (!settings.customEventTypes) {
+    settings.customEventTypes = [];
+  }
+
+  if (settings.customEventTypes.some((entry) => entry.id === slug)) {
+    return;
+  }
+
+  settings.customEventTypes.push({
+    id: slug,
+    label: custom.label?.trim() || humanizeTypeId(slug),
+    emoji: custom.emoji?.trim() || "✨",
+  });
+}
+
+export function buildEventRecord(typeId, occurredAt = new Date()) {
+  const randomId = globalThis.crypto?.randomUUID?.() ?? Math.random().toString(36).slice(2);
+
+  return {
+    id: `${occurredAt.getTime()}-${typeId}-${randomId}`,
+    type: typeId,
+    occurredAt: occurredAt.toISOString(),
+    dateKey: getTodayKey(occurredAt),
+    committed: false,
+  };
+}
+
 export function getStorageKey(dateKey) {
   return `${STORAGE_PREFIX}:${dateKey}`;
 }
@@ -190,12 +277,6 @@ export function getSuggestedEventTime(eventTypeId, events = [], now = new Date()
   return withTimeFromDate(date, constrainedTime);
 }
 
-function createEventId(eventTypeId, occurredAt) {
-  const randomId = globalThis.crypto?.randomUUID?.() ?? Math.random().toString(36).slice(2);
-
-  return `${occurredAt.getTime()}-${eventTypeId}-${randomId}`;
-}
-
 export function createEvent(eventTypeId, occurredAt = new Date()) {
   const eventType = getEventType(eventTypeId);
 
@@ -203,13 +284,30 @@ export function createEvent(eventTypeId, occurredAt = new Date()) {
     throw new Error(`Unknown puppy event type: ${eventTypeId}`);
   }
 
-  return {
-    id: createEventId(eventTypeId, occurredAt),
-    type: eventTypeId,
-    occurredAt: occurredAt.toISOString(),
-    dateKey: getTodayKey(occurredAt),
-    committed: false,
-  };
+  return buildEventRecord(eventTypeId, occurredAt);
+}
+
+/**
+ * @param {string} typeId
+ * @param {Date} occurredAt
+ * @param {PawPrintsSettings} [settings]
+ */
+export function createFlexibleEvent(typeId, occurredAt, settings = {}) {
+  const slug = normalizeEventTypeSlug(typeId);
+
+  if (!slug) {
+    throw new Error(`Invalid puppy event type: ${typeId}`);
+  }
+
+  if (getEventType(slug)) {
+    return buildEventRecord(slug, occurredAt);
+  }
+
+  if (!(settings.customEventTypes ?? []).some((entry) => entry.id === slug)) {
+    throw new Error(`Unknown puppy event type: ${slug}`);
+  }
+
+  return buildEventRecord(slug, occurredAt);
 }
 
 function normalizeEvent(event) {

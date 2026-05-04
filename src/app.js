@@ -8,8 +8,8 @@ import {
   formatCompactTimeValue,
   getEventGroupsDescending,
   getEventsForDate,
-  getEventType,
   getPendingSyncChanges,
+  getResolvedEventType,
   getPuppyAgeLabel,
   getStoredEvents,
   getTodayKey,
@@ -21,6 +21,12 @@ import {
   shiftDateKey,
   updateEventsTime,
 } from "./events.js";
+import {
+  applyImportPreview,
+  buildImportPreview,
+  fetchAiImportHints,
+  mergeAiHintsIntoPreview,
+} from "./import.js";
 import { createApiUrl, createRemoteSync } from "./sync.js";
 
 const dateFormatter = new Intl.DateTimeFormat(undefined, {
@@ -35,13 +41,18 @@ const AUTH_RETURN_QUERY_KEY = "authReturn";
 const defaultSettings = {
   arrivalDate: "",
   birthDate: "",
+  customEventTypes: [],
 };
 
 function loadSettings() {
   try {
+    const parsed = JSON.parse(window.localStorage.getItem(SETTINGS_KEY));
+    const customEventTypes = Array.isArray(parsed?.customEventTypes) ? parsed.customEventTypes : [];
+
     return {
       ...defaultSettings,
-      ...JSON.parse(window.localStorage.getItem(SETTINGS_KEY)),
+      ...parsed,
+      customEventTypes,
     };
   } catch {
     return { ...defaultSettings };
@@ -134,13 +145,6 @@ function createLogDate(dateKey) {
   return new Date(year, month - 1, day);
 }
 
-function shiftDateKey(dateKey, dayOffset) {
-  const date = createLogDate(dateKey);
-  date.setDate(date.getDate() + dayOffset);
-
-  return getTodayKey(date);
-}
-
 function hasRequiredSettings(settings) {
   return Boolean(settings.arrivalDate && settings.birthDate);
 }
@@ -168,9 +172,10 @@ function renderEvents({ eventList, emptyState, logSummary, date, dateKey, settin
   eventList.replaceChildren();
 
   eventGroups.forEach((eventGroup) => {
-    const knownEvents = eventGroup.events
-      .map((event) => ({ event, eventType: getEventType(event.type) }))
-      .filter(({ eventType }) => Boolean(eventType));
+    const knownEvents = eventGroup.events.map((event) => ({
+      event,
+      eventType: getResolvedEventType(event.type, settings),
+    }));
 
     if (knownEvents.length === 0) return;
 
@@ -186,7 +191,7 @@ function renderEvents({ eventList, emptyState, logSummary, date, dateKey, settin
         data-drag-handle
         aria-label="Drag to reorder ${eventNames}"
       >
-        ⠿
+        ⋮
       </button>
       <label class="event-time-control">
         <span class="visually-hidden">Time for ${eventNames}</span>
@@ -287,6 +292,58 @@ function isExpiredSessionOutcome(session) {
   return session.status === 401 || session.status === 403;
 }
 
+function paintImportPreviewOut(container, preview, errors) {
+  if (!container) {
+    return;
+  }
+
+  container.replaceChildren();
+  const hasRows = Boolean(preview?.previewRows?.length);
+  const hasErrors = Boolean(errors?.length);
+  container.hidden = !hasRows && !hasErrors;
+
+  if (hasErrors) {
+    const list = document.createElement("ul");
+    list.className = "import-errors";
+    for (const message of errors) {
+      const item = document.createElement("li");
+      item.textContent = message;
+      list.appendChild(item);
+    }
+    container.appendChild(list);
+  }
+
+  if (hasRows) {
+    const table = document.createElement("table");
+    table.className = "import-preview-table";
+    const headRow = document.createElement("tr");
+    for (const label of ["Time", "Line", "Matched"]) {
+      const th = document.createElement("th");
+      th.textContent = label;
+      headRow.appendChild(th);
+    }
+    const thead = document.createElement("thead");
+    thead.appendChild(headRow);
+    table.appendChild(thead);
+    const tbody = document.createElement("tbody");
+    for (const row of preview.previewRows) {
+      const tr = document.createElement("tr");
+      const timeCell = document.createElement("td");
+      timeCell.textContent = `${String(row.hours).padStart(2, "0")}${String(row.minutes).padStart(2, "0")}`;
+      const lineCell = document.createElement("td");
+      lineCell.textContent = row.rawLine;
+      const matchCell = document.createElement("td");
+      matchCell.textContent = row.tokenPreviews
+        .map((tp) => `${tp.raw} → ${tp.resolution.typeId} (${tp.resolution.source})`)
+        .join("; ");
+      tr.append(timeCell, lineCell, matchCell);
+      tbody.appendChild(tr);
+    }
+    table.appendChild(tbody);
+    container.appendChild(table);
+  }
+}
+
 export function renderPuppyLog() {
   const eventButtons = document.querySelector("[data-event-buttons]");
   const eventList = document.querySelector("[data-event-list]");
@@ -321,6 +378,14 @@ export function renderPuppyLog() {
   const whatsappInviteLink = document.querySelector("[data-whatsapp-invite]");
   const copyInviteButton = document.querySelector("[data-copy-invite]");
   const shareStatus = document.querySelector("[data-share-status]");
+  const importSection = document.querySelector("[data-import-section]");
+  const importText = document.querySelector("[data-import-text]");
+  const importPreviewButton = document.querySelector("[data-import-preview]");
+  const importAiButton = document.querySelector("[data-import-ai]");
+  const importApplyButton = document.querySelector("[data-import-apply]");
+  const importPreviewOut = document.querySelector("[data-import-preview-out]");
+  const importStatus = document.querySelector("[data-import-status]");
+  const undoButton = document.querySelector("[data-undo]");
   const settings = loadSettings();
   const todayKey = getTodayKey();
   let isSignedIn = false;
@@ -366,6 +431,66 @@ export function renderPuppyLog() {
   });
 
   let selectedDateKey = todayKey;
+  let cachedRemoteSnapshotEvents = [];
+  let loadedEventWindowMinKey = "";
+  let loadedEventWindowMaxKey = "";
+  const undoStack = [];
+  let importPreview = null;
+
+  const TEN_MINUTES_MS = 10 * 60 * 1000;
+
+  function materializeRemoteEventsWindow(windowMinKey, windowMaxKey) {
+    loadedEventWindowMinKey = windowMinKey;
+    loadedEventWindowMaxKey = windowMaxKey;
+    applyStoredEventsSnapshotToWindow(window.localStorage, cachedRemoteSnapshotEvents, windowMinKey, windowMaxKey);
+  }
+
+  function ensureEventBufferForSelectedDay() {
+    if (!settings.arrivalDate) {
+      return;
+    }
+
+    const arrival = settings.arrivalDate;
+    const needMin = clampDateKey(shiftDateKey(selectedDateKey, -1), arrival, todayKey);
+    const needMax = clampDateKey(shiftDateKey(selectedDateKey, 1), arrival, todayKey);
+
+    if (loadedEventWindowMinKey === "") {
+      const spanMin = clampDateKey(shiftDateKey(todayKey, -2), arrival, todayKey);
+      const spanMax = clampDateKey(shiftDateKey(todayKey, 2), arrival, todayKey);
+      const nextMin = clampDateKey(Math.min(spanMin, needMin), arrival, todayKey);
+      const nextMax = clampDateKey(Math.max(spanMax, needMax), arrival, todayKey);
+
+      materializeRemoteEventsWindow(nextMin, nextMax);
+      return;
+    }
+
+    let nextMin = needMin < loadedEventWindowMinKey ? needMin : loadedEventWindowMinKey;
+    let nextMax = needMax > loadedEventWindowMaxKey ? needMax : loadedEventWindowMaxKey;
+    nextMin = clampDateKey(nextMin, arrival, todayKey);
+    nextMax = clampDateKey(nextMax, arrival, todayKey);
+
+    if (nextMin === loadedEventWindowMinKey && nextMax === loadedEventWindowMaxKey) {
+      return;
+    }
+
+    materializeRemoteEventsWindow(nextMin, nextMax);
+  }
+
+  function pushUndoEntry(entry) {
+    undoStack.push(entry);
+    if (undoStack.length > 25) {
+      undoStack.shift();
+    }
+    if (undoButton) {
+      undoButton.disabled = false;
+    }
+  }
+
+  function refreshUndoControl() {
+    if (undoButton) {
+      undoButton.disabled = undoStack.length === 0;
+    }
+  }
 
   logDateInput.value = selectedDateKey;
   logDateInput.max = todayKey;
@@ -414,6 +539,14 @@ export function renderPuppyLog() {
       section.toggleAttribute("hidden", !isSetupComplete);
     });
 
+    if (importSection) {
+      importSection.toggleAttribute("hidden", !isSetupComplete);
+    }
+
+    if (importAiButton) {
+      importAiButton.hidden = !isSignedIn || !isSetupComplete;
+    }
+
     const collaborationRole = accountProfile?.collaboration?.role ?? "owner";
     if (shareCollaboratorNote && shareOwnerTools) {
       if (collaborationRole === "collaborator") {
@@ -432,6 +565,12 @@ export function renderPuppyLog() {
     previousDayButton.disabled = !settings.arrivalDate || selectedDateKey <= settings.arrivalDate;
     nextDayButton.disabled = selectedDateKey >= todayKey;
 
+    if (isSetupComplete && settings.arrivalDate) {
+      ensureEventBufferForSelectedDay();
+    }
+
+    refreshUndoControl();
+
     renderEvents({
       eventList,
       emptyState,
@@ -448,6 +587,13 @@ export function renderPuppyLog() {
       isSignedIn = false;
       accountProfile = null;
       bootstrapError = null;
+      cachedRemoteSnapshotEvents = [];
+      loadedEventWindowMinKey = "";
+      loadedEventWindowMaxKey = "";
+      undoStack.length = 0;
+      if (undoButton) {
+        undoButton.disabled = true;
+      }
       clearSignedInMarker();
       if (syncStatus) syncStatus.textContent = "";
       if (shareInviteBlock) shareInviteBlock.hidden = true;
@@ -521,6 +667,13 @@ export function renderPuppyLog() {
 
     addStatus.textContent =
       addedEvents.length === 0 ? "Choose today or an earlier log day." : "";
+    if (addedEvents.length > 0) {
+      pushUndoEntry({
+        type: "add",
+        dateKey: selectedDateKey,
+        eventIds: addedEvents.map((item) => item.id),
+      });
+    }
     remoteSync.schedule();
     renderState();
   });
@@ -529,7 +682,17 @@ export function renderPuppyLog() {
     const button = event.target.closest("[data-remove-event]");
     if (!button) return;
 
-    removeEvent(window.localStorage, button.dataset.removeEvent, createLogDate(selectedDateKey));
+    const logDate = createLogDate(selectedDateKey);
+    const removed = getEventsForDate(window.localStorage, logDate).find(
+      (item) => item.id === button.dataset.removeEvent,
+    );
+
+    removeEvent(window.localStorage, button.dataset.removeEvent, logDate);
+
+    if (removed) {
+      pushUndoEntry({ type: "remove", event: removed });
+    }
+
     remoteSync.schedule();
     renderState();
   });
@@ -560,6 +723,169 @@ export function renderPuppyLog() {
     }
     addStatus.textContent = "";
     renderState();
+  });
+
+  undoButton?.addEventListener("click", () => {
+    const entry = undoStack.pop();
+    if (!entry) {
+      return;
+    }
+
+    if (entry.type === "remove") {
+      insertEventPreservingOrder(window.localStorage, entry.event);
+    } else if (entry.type === "add") {
+      entry.eventIds.forEach((eventId) => {
+        removeEvent(window.localStorage, eventId, createLogDate(entry.dateKey));
+      });
+    }
+
+    refreshUndoControl();
+    remoteSync.schedule();
+    renderState();
+  });
+
+  let listDrag = null;
+
+  function pointerToInsertIndex(clientY, listElement, skipElement) {
+    const children = [...listElement.querySelectorAll(":scope > .event-list-item")];
+    let index = 0;
+
+    for (const child of children) {
+      if (child === skipElement) {
+        continue;
+      }
+
+      const rect = child.getBoundingClientRect();
+      if (clientY < rect.top + rect.height / 2) {
+        return index;
+      }
+
+      index += 1;
+    }
+
+    return index;
+  }
+
+  eventList.addEventListener("pointerdown", (event) => {
+    const handle = event.target.closest("[data-drag-handle]");
+    if (!handle || !hasRequiredSettings(settings)) {
+      return;
+    }
+
+    const item = handle.closest(".event-list-item");
+    if (!item || !eventList.contains(item)) {
+      return;
+    }
+
+    event.preventDefault();
+    handle.setPointerCapture(event.pointerId);
+    const items = [...eventList.querySelectorAll(":scope > .event-list-item")];
+    const fromIndex = items.indexOf(item);
+
+    if (fromIndex === -1) {
+      return;
+    }
+
+    listDrag = {
+      pointerId: event.pointerId,
+      handle,
+      item,
+      fromIndex,
+    };
+    item.classList.add("is-dragging");
+  });
+
+  eventList.addEventListener("pointermove", (event) => {
+    if (!listDrag || event.pointerId !== listDrag.pointerId) {
+      return;
+    }
+
+    event.preventDefault();
+  });
+
+  eventList.addEventListener("pointerup", (event) => {
+    if (!listDrag || event.pointerId !== listDrag.pointerId) {
+      return;
+    }
+
+    const { handle, item, fromIndex } = listDrag;
+    item.classList.remove("is-dragging");
+
+    try {
+      handle.releasePointerCapture(event.pointerId);
+    } catch {
+      // ignore release errors
+    }
+
+    listDrag = null;
+
+    const insertAt = pointerToInsertIndex(event.clientY, eventList, item);
+    const logDate = createLogDate(selectedDateKey);
+    const groups = getEventGroupsDescending(getEventsForDate(window.localStorage, logDate));
+
+    if (groups.length < 2 || fromIndex === insertAt) {
+      return;
+    }
+
+    const reordered = [...groups];
+    const [moved] = reordered.splice(fromIndex, 1);
+    reordered.splice(insertAt, 0, moved);
+
+    const chrono = [...reordered].reverse();
+    const movedAt = moved.occurredAt;
+    const mi = chrono.findIndex((group) => group.occurredAt === movedAt);
+
+    if (mi === -1) {
+      return;
+    }
+
+    const prevMs = mi > 0 ? new Date(chrono[mi - 1].occurredAt).getTime() : null;
+    const nextMs =
+      mi < chrono.length - 1 ? new Date(chrono[mi + 1].occurredAt).getTime() : null;
+
+    let hintMs = new Date(moved.occurredAt).getTime();
+    if (prevMs != null && nextMs != null) {
+      hintMs = (prevMs + nextMs) / 2;
+    }
+
+    const snapMs = pickSnappedTimeMsBetweenNeighbors(prevMs, nextMs, hintMs);
+    let adjusted = clampOccurredAtForLogDay(new Date(snapMs), logDate, new Date());
+
+    if (prevMs != null && adjusted.getTime() <= prevMs) {
+      adjusted = clampOccurredAtForLogDay(new Date(prevMs + TEN_MINUTES_MS), logDate, new Date());
+    }
+
+    if (nextMs != null && adjusted.getTime() >= nextMs) {
+      adjusted = clampOccurredAtForLogDay(new Date(nextMs - TEN_MINUTES_MS), logDate, new Date());
+    }
+
+    const hh = String(adjusted.getHours()).padStart(2, "0");
+    const mm = String(adjusted.getMinutes()).padStart(2, "0");
+
+    updateEventsTime(
+      window.localStorage,
+      moved.events.map((ev) => ev.id),
+      `${hh}${mm}`,
+      logDate,
+    );
+    remoteSync.schedule();
+    renderState();
+  });
+
+  eventList.addEventListener("pointercancel", (event) => {
+    if (!listDrag || event.pointerId !== listDrag.pointerId) {
+      return;
+    }
+
+    listDrag.item.classList.remove("is-dragging");
+
+    try {
+      listDrag.handle.releasePointerCapture(event.pointerId);
+    } catch {
+      // ignore release errors
+    }
+
+    listDrag = null;
   });
 
   arrivalDateInput.addEventListener("change", () => {
@@ -597,6 +923,66 @@ export function renderPuppyLog() {
     }
     logDateInput.value = selectedDateKey;
     addStatus.textContent = "";
+    renderState();
+  });
+
+  importPreviewButton?.addEventListener("click", () => {
+    if (importStatus) importStatus.textContent = "";
+    importPreview = buildImportPreview(settings, importText?.value ?? "");
+    paintImportPreviewOut(importPreviewOut, importPreview, importPreview.errors);
+    const ready = Boolean(importPreview.previewRows?.length);
+    if (importApplyButton) importApplyButton.disabled = !ready;
+    if (importStatus) {
+      importStatus.textContent = ready
+        ? `${importPreview.previewRows.length} row(s) ready.`
+        : importPreview.errors?.length
+          ? "Fix paste or parse errors."
+          : "Nothing to import.";
+    }
+  });
+
+  importAiButton?.addEventListener("click", async () => {
+    if (!importPreview?.previewRows?.length) {
+      if (importStatus) importStatus.textContent = "Preview first.";
+      return;
+    }
+
+    if (importStatus) importStatus.textContent = "Refining with AI…";
+    const tokens = importPreview.previewRows.flatMap((row) =>
+      row.tokenPreviews.map((tp) => tp.raw),
+    );
+    const response = await fetchAiImportHints(tokens, settings);
+    if (!response?.matches?.length) {
+      if (importStatus) {
+        if (response?.aiAvailable === false) {
+          importStatus.textContent = "AI matching is not configured on the server.";
+        } else {
+          importStatus.textContent = "AI refine returned no suggestions.";
+        }
+      }
+      return;
+    }
+
+    mergeAiHintsIntoPreview(importPreview, response.matches, settings);
+    saveSettings(settings);
+    paintImportPreviewOut(importPreviewOut, importPreview, importPreview.errors);
+    if (importStatus) importStatus.textContent = "AI hints applied.";
+    if (importApplyButton) importApplyButton.disabled = false;
+  });
+
+  importApplyButton?.addEventListener("click", () => {
+    if (!importPreview?.previewRows?.length) {
+      if (importStatus) importStatus.textContent = "Preview first.";
+      return;
+    }
+
+    const count = applyImportPreview(window.localStorage, settings, selectedDateKey, importPreview);
+    saveSettings(settings);
+    remoteSync.schedule();
+    if (importStatus) importStatus.textContent = `Imported ${count} events for ${selectedDateKey}.`;
+    importPreview = null;
+    paintImportPreviewOut(importPreviewOut, null, []);
+    if (importApplyButton) importApplyButton.disabled = true;
     renderState();
   });
 
@@ -683,7 +1069,19 @@ export function renderPuppyLog() {
         const snapshot = await remoteSync.loadSnapshot();
         if (snapshot) {
           applyRemoteSettings(settings, snapshot.settings);
-          applyStoredEventsSnapshot(window.localStorage, snapshot.events);
+          arrivalDateInput.value = settings.arrivalDate;
+          birthDateInput.value = settings.birthDate;
+          cachedRemoteSnapshotEvents = snapshot.events ?? [];
+
+          if (settings.arrivalDate) {
+            const initialMin = clampDateKey(shiftDateKey(todayKey, -2), settings.arrivalDate, todayKey);
+            const initialMax = clampDateKey(shiftDateKey(todayKey, 2), settings.arrivalDate, todayKey);
+            materializeRemoteEventsWindow(initialMin, initialMax);
+          } else {
+            applyStoredEventsSnapshot(window.localStorage, cachedRemoteSnapshotEvents);
+            loadedEventWindowMinKey = "";
+            loadedEventWindowMaxKey = "";
+          }
         }
       } catch (snapshotError) {
         console.error(snapshotError);

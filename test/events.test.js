@@ -6,20 +6,23 @@ import {
   addEvent,
   addEventWithDefaults,
   applyStoredEventsSnapshot,
+  applyStoredEventsSnapshotToWindow,
   createEvent,
   formatTimeInputValue,
+  getEventsForDate,
   getPendingSyncChanges,
   getPuppyAgeLabel,
-  getEventsForDate,
   getStorageKey,
   getStoredEvents,
   getTodayKey,
   getTrackingDay,
   loadEventsForDate,
   markSyncCommitted,
+  pickSnappedTimeMsBetweenNeighbors,
   replaceStoredEvents,
   removeEvent,
   saveEventsForDate,
+  shiftDateKey,
   updateEventsTime,
 } from "../src/events.js";
 
@@ -353,6 +356,62 @@ test("GivenPendingAndAcknowledgedChanges_WhenMarkingCommitted_ThenEventsAndDelet
   const stored = loadEventsForDate(storage, dateKey);
   assert.equal(stored[0].committed, true);
   assert.deepEqual(getPendingSyncChanges(storage).deletedEventIds, ["deleted-1"]);
+});
+
+test("GivenAShiftedDayOffset_WhenShiftingDateKey_ThenCalendarArithmeticIsApplied", () => {
+  assert.equal(shiftDateKey("2026-04-26", -1), "2026-04-25");
+  assert.equal(shiftDateKey("2026-04-26", 1), "2026-04-27");
+});
+
+test("GivenNeighborsAndHint_WhenPickingSnapTime_ThenResultHonoursTenMinuteGap", () => {
+  const prevMs = new Date("2026-04-26T10:00:00.000Z").getTime();
+  const nextMs = new Date("2026-04-26T11:00:00.000Z").getTime();
+  const hintMs = (prevMs + nextMs) / 2;
+
+  const snapped = pickSnappedTimeMsBetweenNeighbors(prevMs, nextMs, hintMs);
+
+  assert.ok(snapped > prevMs);
+  assert.ok(snapped < nextMs);
+});
+
+test("GivenRemoteSnapshotAcrossDays_WhenApplyingWindow_ThenOutsideCommittedDaysAreTrimmed", () => {
+  const sleepCommitted = {
+    ...createEvent("sleep", new Date("2026-04-24T22:00:00.000Z")),
+    committed: true,
+  };
+  const wakeCommitted = {
+    ...createEvent("wake", new Date("2026-04-26T07:00:00.000Z")),
+    committed: true,
+  };
+  const storage = createMemoryStorage({
+    [`puppy-events:2026-04-24`]: JSON.stringify([sleepCommitted]),
+    [`puppy-events:2026-04-26`]: JSON.stringify([wakeCommitted]),
+  });
+
+  const remote = [
+    {
+      id: "remote-1",
+      type: "eat",
+      occurredAt: "2026-04-25T12:00:00.000Z",
+      dateKey: "2026-04-25",
+    },
+    {
+      id: "remote-2",
+      type: "nap",
+      occurredAt: "2026-04-26T14:00:00.000Z",
+      dateKey: "2026-04-26",
+    },
+  ];
+
+  applyStoredEventsSnapshotToWindow(storage, remote, "2026-04-25", "2026-04-26");
+
+  assert.equal(storage.getItem("puppy-events:2026-04-24"), null);
+  const storedKeys = [];
+  for (let i = 0; i < storage.length; i += 1) {
+    storedKeys.push(storage.key(i));
+  }
+  assert.ok(storedKeys.includes("puppy-events:2026-04-25"));
+  assert.ok(storedKeys.includes("puppy-events:2026-04-26"));
 });
 
 test("GivenRemoteSnapshotAndLocalPendingEdits_WhenApplyingSnapshot_ThenPendingEditsArePreserved", () => {
