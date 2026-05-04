@@ -4,7 +4,9 @@ namespace PawPrints.Api.Contracts;
 
 public sealed record SyncSnapshotRequest(
     SyncSettingsRequest Settings,
-    IReadOnlyCollection<SyncEventRequest> Events
+    IReadOnlyCollection<SyncEventRequest>? Events = null,
+    IReadOnlyCollection<SyncEventRequest>? Upserts = null,
+    IReadOnlyCollection<string>? DeletedEventIds = null
 );
 
 public sealed record SyncSettingsRequest(

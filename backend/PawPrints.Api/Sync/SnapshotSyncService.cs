@@ -14,8 +14,6 @@ public sealed class SnapshotSyncService(
         CancellationToken cancellationToken
     )
     {
-        logger.LogInformation("Loading PawPrints snapshot for {Email}.", email);
-
         var actor = await db.Users
             .AsNoTracking()
             .Include(storedUser => storedUser.Events)
@@ -23,11 +21,22 @@ public sealed class SnapshotSyncService(
 
         if (actor is null)
         {
-            logger.LogInformation("No PawPrints snapshot exists yet for {Email}.", email);
+            logger.LogInformation(
+                "Snapshot load completed with outcome {Outcome} email {Email} event count {EventCount} owner id {OwnerUserId} collaborator email {CollaboratorEmail}",
+                "NoProfile",
+                email,
+                0,
+                null,
+                null
+            );
             return null;
         }
 
         var dataUser = actor;
+        long? ownerIdUsed = null;
+        string? collaboratorEmail = null;
+        string outcome;
+
         if (actor.CollaboratesWithUserId is long ownerId)
         {
             var owner = await db.Users
@@ -36,27 +45,29 @@ public sealed class SnapshotSyncService(
                 .SingleOrDefaultAsync(storedUser => storedUser.Id == ownerId, cancellationToken);
             if (owner is null)
             {
-                logger.LogWarning(
-                    "Actor {Email} references missing owner id {OwnerId}; returning their own snapshot row.",
-                    email,
-                    ownerId
-                );
+                outcome = "MissingOwnerFallbackSelf";
+                ownerIdUsed = ownerId;
             }
             else
             {
+                outcome = "SharedFromOwner";
                 dataUser = owner;
-                logger.LogInformation(
-                    "Loading shared puppy log for collaborator {Email} from owner id {OwnerId}.",
-                    email,
-                    ownerId
-                );
+                ownerIdUsed = ownerId;
+                collaboratorEmail = email;
             }
+        }
+        else
+        {
+            outcome = "OwnerData";
         }
 
         logger.LogInformation(
-            "Loaded PawPrints snapshot for {Email}; returning {EventCount} events.",
-            email,
-            dataUser.Events.Count
+            "Snapshot load completed with outcome {Outcome} email {Email} event count {EventCount} owner id {OwnerUserId} collaborator email {CollaboratorEmail}",
+            outcome,
+            dataUser.Email,
+            dataUser.Events.Count,
+            ownerIdUsed,
+            collaboratorEmail
         );
 
         return new SyncSnapshotRequest(
@@ -83,12 +94,6 @@ public sealed class SnapshotSyncService(
         CancellationToken cancellationToken
     )
     {
-        logger.LogInformation(
-            "Syncing PawPrints snapshot for {Email} with {EventCount} events.",
-            email,
-            snapshot.Events.Count
-        );
-
         var arrivalDate = DateOnly.Parse(snapshot.Settings.ArrivalDate);
         var birthDate = DateOnly.Parse(snapshot.Settings.BirthDate);
         var now = DateTimeOffset.UtcNow;
@@ -96,6 +101,10 @@ public sealed class SnapshotSyncService(
         var actor = await db.Users
             .Include(storedUser => storedUser.Events)
             .SingleOrDefaultAsync(storedUser => storedUser.Email == email, cancellationToken);
+
+        var incomingUpserts = GetIncomingUpserts(snapshot);
+        var incomingDeletedEventIds = snapshot.DeletedEventIds ?? [];
+        var usesDeltaSync = snapshot.Upserts is not null || snapshot.DeletedEventIds is not null;
 
         if (actor is null)
         {
@@ -109,7 +118,7 @@ public sealed class SnapshotSyncService(
                 UpdatedAt = now,
             };
             db.Users.Add(newOwner);
-            newOwner.Events = snapshot.Events
+            newOwner.Events = incomingUpserts
                 .Select(snapshotEvent => new PuppyEvent
                 {
                     ClientEventId = snapshotEvent.Id,
@@ -123,9 +132,13 @@ public sealed class SnapshotSyncService(
             await db.SaveChangesAsync(cancellationToken);
 
             logger.LogInformation(
-                "Synced PawPrints snapshot for new owner {Email}; stored {EventCount} events.",
+                "Snapshot sync completed with outcome {Outcome} actor email {ActorEmail} upsert count {UpsertCount} delete count {DeleteCount} events stored {EventCount} owner user id {OwnerUserId}",
+                "CreatedOwner",
                 email,
-                newOwner.Events.Count
+                incomingUpserts.Count,
+                incomingDeletedEventIds.Count,
+                newOwner.Events.Count,
+                newOwner.Id
             );
             return;
         }
@@ -137,24 +150,18 @@ public sealed class SnapshotSyncService(
         {
             actor.ArrivalDate = arrivalDate;
             actor.BirthDate = birthDate;
-            db.Events.RemoveRange(actor.Events);
-            actor.Events = snapshot.Events
-                .Select(snapshotEvent => new PuppyEvent
-                {
-                    ClientEventId = snapshotEvent.Id,
-                    Type = snapshotEvent.Type,
-                    OccurredAt = snapshotEvent.OccurredAt,
-                    DateKey = DateOnly.Parse(snapshotEvent.DateKey),
-                    MetadataJson = snapshotEvent.Details?.GetRawText(),
-                })
-                .ToList();
+            ApplyEventChanges(actor, incomingUpserts, incomingDeletedEventIds, usesDeltaSync);
 
             await db.SaveChangesAsync(cancellationToken);
 
             logger.LogInformation(
-                "Synced PawPrints snapshot for owner {Email}; stored {EventCount} events.",
+                "Snapshot sync completed with outcome {Outcome} actor email {ActorEmail} upsert count {UpsertCount} delete count {DeleteCount} events stored {EventCount} owner user id {OwnerUserId}",
+                "UpdatedOwner",
                 email,
-                actor.Events.Count
+                incomingUpserts.Count,
+                incomingDeletedEventIds.Count,
+                actor.Events.Count,
+                actor.Id
             );
             return;
         }
@@ -166,32 +173,26 @@ public sealed class SnapshotSyncService(
         if (owner is null)
         {
             logger.LogWarning(
-                "Collaborator {Email} referenced missing owner id {OwnerId}; syncing as standalone owner row.",
-                email,
-                actor.CollaboratesWithUserId
+                "Snapshot sync reconciling missing owner id {OwnerId} for collaborator {ActorEmail}",
+                actor.CollaboratesWithUserId,
+                email
             );
 
             actor.CollaboratesWithUserId = null;
             actor.ArrivalDate = arrivalDate;
             actor.BirthDate = birthDate;
-            db.Events.RemoveRange(actor.Events);
-            actor.Events = snapshot.Events
-                .Select(snapshotEvent => new PuppyEvent
-                {
-                    ClientEventId = snapshotEvent.Id,
-                    Type = snapshotEvent.Type,
-                    OccurredAt = snapshotEvent.OccurredAt,
-                    DateKey = DateOnly.Parse(snapshotEvent.DateKey),
-                    MetadataJson = snapshotEvent.Details?.GetRawText(),
-                })
-                .ToList();
+            ApplyEventChanges(actor, incomingUpserts, incomingDeletedEventIds, usesDeltaSync);
 
             await db.SaveChangesAsync(cancellationToken);
 
             logger.LogInformation(
-                "Synced PawPrints snapshot for recovered owner {Email}; stored {EventCount} events.",
+                "Snapshot sync completed with outcome {Outcome} actor email {ActorEmail} upsert count {UpsertCount} delete count {DeleteCount} events stored {EventCount} owner user id {OwnerUserId}",
+                "RecoveredStandaloneOwner",
                 email,
-                actor.Events.Count
+                incomingUpserts.Count,
+                incomingDeletedEventIds.Count,
+                actor.Events.Count,
+                actor.Id
             );
             return;
         }
@@ -199,18 +200,7 @@ public sealed class SnapshotSyncService(
         owner.ArrivalDate = arrivalDate;
         owner.BirthDate = birthDate;
         owner.UpdatedAt = now;
-        db.Events.RemoveRange(owner.Events);
-        owner.Events = snapshot.Events
-            .Select(snapshotEvent => new PuppyEvent
-            {
-                UserId = owner.Id,
-                ClientEventId = snapshotEvent.Id,
-                Type = snapshotEvent.Type,
-                OccurredAt = snapshotEvent.OccurredAt,
-                DateKey = DateOnly.Parse(snapshotEvent.DateKey),
-                MetadataJson = snapshotEvent.Details?.GetRawText(),
-            })
-            .ToList();
+        ApplyEventChanges(owner, incomingUpserts, incomingDeletedEventIds, usesDeltaSync);
 
         if (actor.Events.Count > 0)
         {
@@ -221,10 +211,83 @@ public sealed class SnapshotSyncService(
         await db.SaveChangesAsync(cancellationToken);
 
         logger.LogInformation(
-            "Synced PawPrints snapshot from collaborator {Email} onto owner id {OwnerId}; stored {EventCount} shared events.",
+            "Snapshot sync completed with outcome {Outcome} actor email {ActorEmail} upsert count {UpsertCount} delete count {DeleteCount} events stored {EventCount} owner user id {OwnerUserId}",
+            "UpdatedSharedOwner",
             email,
-            owner.Id,
-            owner.Events.Count
+            incomingUpserts.Count,
+            incomingDeletedEventIds.Count,
+            owner.Events.Count,
+            owner.Id
         );
+    }
+
+    private static IReadOnlyCollection<SyncEventRequest> GetIncomingUpserts(SyncSnapshotRequest snapshot)
+    {
+        return snapshot.Upserts ?? snapshot.Events ?? [];
+    }
+
+    private void ApplyEventChanges(
+        PawPrintsUser user,
+        IReadOnlyCollection<SyncEventRequest> upserts,
+        IReadOnlyCollection<string> deletedEventIds,
+        bool useDeltaSync
+    )
+    {
+        if (!useDeltaSync)
+        {
+            db.Events.RemoveRange(user.Events);
+            user.Events = upserts
+                .Select(snapshotEvent => new PuppyEvent
+                {
+                    UserId = user.Id,
+                    ClientEventId = snapshotEvent.Id,
+                    Type = snapshotEvent.Type,
+                    OccurredAt = snapshotEvent.OccurredAt,
+                    DateKey = DateOnly.Parse(snapshotEvent.DateKey),
+                    MetadataJson = snapshotEvent.Details?.GetRawText(),
+                })
+                .ToList();
+            return;
+        }
+
+        var eventsByClientId = user.Events.ToDictionary(existing => existing.ClientEventId, StringComparer.Ordinal);
+
+        foreach (var upsert in upserts)
+        {
+            if (eventsByClientId.TryGetValue(upsert.Id, out var existing))
+            {
+                existing.Type = upsert.Type;
+                existing.OccurredAt = upsert.OccurredAt;
+                existing.DateKey = DateOnly.Parse(upsert.DateKey);
+                existing.MetadataJson = upsert.Details?.GetRawText();
+                continue;
+            }
+
+            user.Events.Add(new PuppyEvent
+            {
+                UserId = user.Id,
+                ClientEventId = upsert.Id,
+                Type = upsert.Type,
+                OccurredAt = upsert.OccurredAt,
+                DateKey = DateOnly.Parse(upsert.DateKey),
+                MetadataJson = upsert.Details?.GetRawText(),
+            });
+        }
+
+        if (deletedEventIds.Count == 0)
+        {
+            return;
+        }
+
+        var deletedIdSet = deletedEventIds.ToHashSet(StringComparer.Ordinal);
+        var toRemove = user.Events.Where(stored => deletedIdSet.Contains(stored.ClientEventId)).ToList();
+        if (toRemove.Count > 0)
+        {
+            db.Events.RemoveRange(toRemove);
+            foreach (var deleted in toRemove)
+            {
+                user.Events.Remove(deleted);
+            }
+        }
     }
 }

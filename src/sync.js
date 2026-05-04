@@ -42,7 +42,10 @@ async function createApiError(response, path) {
   return error;
 }
 
-export function createRemoteSync(storage, { getSettings, loadEvents, onStatusChange }) {
+export function createRemoteSync(
+  storage,
+  { getSettings, loadEvents, getPendingChanges, markChangesCommitted, onStatusChange, onInFlightChange },
+) {
   let pendingSyncId;
   const authPath = "/api/auth/me";
 
@@ -52,37 +55,44 @@ export function createRemoteSync(storage, { getSettings, loadEvents, onStatusCha
       return;
     }
 
+    onInFlightChange?.(true);
     onStatusChange?.("Saving...");
-    const response = await fetch(createApiUrl("/api/sync"), {
-      method: "PUT",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      credentials: "include",
-      body: JSON.stringify({
-        settings: {
-          arrivalDate: settings.arrivalDate,
-          birthDate: settings.birthDate,
+    const pendingChanges = getPendingChanges?.(storage) ?? { upserts: [], deletedEventIds: [] };
+
+    try {
+      const response = await fetch(createApiUrl("/api/sync"), {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
         },
-        events: loadEvents(storage).map((event) => ({
-          id: event.id,
-          type: event.type,
-          occurredAt: event.occurredAt,
-          dateKey: event.dateKey,
-        })),
-      }),
-    });
+        credentials: "include",
+        body: JSON.stringify({
+          settings: {
+            arrivalDate: settings.arrivalDate,
+            birthDate: settings.birthDate,
+          },
+          upserts: pendingChanges.upserts,
+          deletedEventIds: pendingChanges.deletedEventIds,
+        }),
+      });
 
-    if (response.status === 401 || response.status === 403) {
-      onStatusChange?.("Sign in to sync");
-      return;
+      if (response.status === 401 || response.status === 403) {
+        onStatusChange?.("Sign in to sync");
+        return;
+      }
+
+      if (!response.ok) {
+        throw new Error(`PawPrints sync failed with ${response.status}`);
+      }
+
+      markChangesCommitted?.(storage, {
+        upsertIds: pendingChanges.upserts.map((event) => event.id),
+        deletedEventIds: pendingChanges.deletedEventIds,
+      });
+      onStatusChange?.("Saved");
+    } finally {
+      onInFlightChange?.(false);
     }
-
-    if (!response.ok) {
-      throw new Error(`PawPrints sync failed with ${response.status}`);
-    }
-
-    onStatusChange?.("Saved");
   }
 
   return {
@@ -94,6 +104,7 @@ export function createRemoteSync(storage, { getSettings, loadEvents, onStatusCha
         syncNow().catch((error) => {
           console.error(error);
           onStatusChange?.("Sync failed");
+          onInFlightChange?.(false);
         });
       }, SYNC_DEBOUNCE_MS);
     },

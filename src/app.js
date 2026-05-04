@@ -3,14 +3,15 @@ import {
   addEventWithDefaults,
   applyStoredEventsSnapshot,
   formatCompactTimeValue,
+  getPendingSyncChanges,
   getPuppyAgeLabel,
   getEventType,
   getEventsForDate,
+  markSyncCommitted,
   getStoredEvents,
   getTodayKey,
   getTrackingDay,
   removeEvent,
-  replaceStoredEvents,
   updateEventsTime,
 } from "./events.js";
 import { createApiUrl, createRemoteSync } from "./sync.js";
@@ -317,11 +318,23 @@ export function renderPuppyLog() {
   let isCheckingSession = false;
   let bootstrapError = null;
   let accountProfile = null;
+  if (syncStatus) {
+    syncStatus.classList.add("sync-status");
+  }
+
   const remoteSync = createRemoteSync(window.localStorage, {
     getSettings: () => settings,
     loadEvents: getStoredEvents,
+    getPendingChanges: getPendingSyncChanges,
+    markChangesCommitted: markSyncCommitted,
     onStatusChange(status) {
       if (syncStatus) syncStatus.textContent = status;
+    },
+    onInFlightChange(isInFlight) {
+      document.body.classList.toggle("is-syncing", isInFlight);
+      if (syncStatus) {
+        syncStatus.classList.toggle("is-in-flight", isInFlight);
+      }
     },
   });
 

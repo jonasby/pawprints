@@ -11,19 +11,22 @@ public sealed class InviteService(PawPrintsDbContext db, ILogger<InviteService> 
 
     public async Task<CreateInviteResponse?> CreateInviteAsync(string ownerEmail, CancellationToken cancellationToken)
     {
-        logger.LogInformation("Creating PawPrints collaboration invite for {OwnerEmail}.", ownerEmail);
-
         var owner = await db.Users.SingleOrDefaultAsync(storedUser => storedUser.Email == ownerEmail, cancellationToken);
         if (owner is null)
         {
-            logger.LogWarning("Invite creation failed because no PawPrints profile exists for {OwnerEmail}.", ownerEmail);
+            logger.LogWarning(
+                "Collaboration invite create completed with outcome {Outcome} for owner email {OwnerEmail}",
+                "ProfileNotFound",
+                ownerEmail
+            );
             return null;
         }
 
         if (owner.CollaboratesWithUserId is not null)
         {
             logger.LogWarning(
-                "Invite creation rejected because {Email} collaborates on another owner's log.",
+                "Collaboration invite create completed with outcome {Outcome} for owner email {OwnerEmail}",
+                "CollaboratorCannotInvite",
                 ownerEmail
             );
             throw new InvalidOperationException("Collaborators cannot create invites.");
@@ -46,9 +49,11 @@ public sealed class InviteService(PawPrintsDbContext db, ILogger<InviteService> 
         await db.SaveChangesAsync(cancellationToken);
 
         logger.LogInformation(
-            "Created collaboration invite id {InviteId} for owner user id {OwnerUserId}; expires {ExpiresAtUtc:o}.",
+            "Collaboration invite create completed with outcome {Outcome} invite id {InviteId} owner user id {OwnerUserId} owner email {OwnerEmail} expires at {ExpiresAtUtc:o}",
+            "Created",
             invite.Id,
             owner.Id,
+            ownerEmail,
             invite.ExpiresAtUtc
         );
 
@@ -62,7 +67,10 @@ public sealed class InviteService(PawPrintsDbContext db, ILogger<InviteService> 
         CancellationToken cancellationToken
     )
     {
-        logger.LogInformation("Accepting collaboration invite for invitee {InviteeEmail}.", inviteeEmail);
+        string outcome;
+        long? inviteId = null;
+        long? inviteeUserId = null;
+        long? ownerUserId = null;
 
         string tokenHash;
         try
@@ -71,7 +79,8 @@ public sealed class InviteService(PawPrintsDbContext db, ILogger<InviteService> 
         }
         catch (FormatException)
         {
-            logger.LogWarning("Invite acceptance failed: token was not valid hex.");
+            outcome = "InvalidTokenFormat";
+            LogAcceptComplete(outcome, inviteeEmail, inviteId, inviteeUserId, ownerUserId);
             return AcceptInviteResult.Fail("Invite not found or expired.", StatusCodes.Status404NotFound);
         }
 
@@ -81,26 +90,33 @@ public sealed class InviteService(PawPrintsDbContext db, ILogger<InviteService> 
 
         if (invite is null)
         {
-            logger.LogWarning("Invite acceptance failed: token not found.");
+            outcome = "TokenNotFound";
+            LogAcceptComplete(outcome, inviteeEmail, inviteId, inviteeUserId, ownerUserId);
             return AcceptInviteResult.Fail("Invite not found or expired.", StatusCodes.Status404NotFound);
         }
 
+        inviteId = invite.Id;
+        ownerUserId = invite.OwnerUserId;
+
         if (invite.ConsumedAtUtc is not null)
         {
-            logger.LogWarning("Invite acceptance failed: invite id {InviteId} already consumed.", invite.Id);
+            outcome = "AlreadyConsumed";
+            LogAcceptComplete(outcome, inviteeEmail, inviteId, inviteeUserId, ownerUserId);
             return AcceptInviteResult.Fail("This invite was already used.", StatusCodes.Status409Conflict);
         }
 
         if (invite.ExpiresAtUtc < DateTimeOffset.UtcNow)
         {
-            logger.LogWarning("Invite acceptance failed: invite id {InviteId} expired at {ExpiresAtUtc:o}.", invite.Id, invite.ExpiresAtUtc);
+            outcome = "Expired";
+            LogAcceptComplete(outcome, inviteeEmail, inviteId, inviteeUserId, ownerUserId);
             return AcceptInviteResult.Fail("This invite has expired.", StatusCodes.Status410Gone);
         }
 
         var owner = invite.Owner;
         if (string.Equals(owner.Email, inviteeEmail, StringComparison.OrdinalIgnoreCase))
         {
-            logger.LogWarning("Invite acceptance rejected: invitee matches owner email.");
+            outcome = "InviteeIsOwner";
+            LogAcceptComplete(outcome, inviteeEmail, inviteId, inviteeUserId, ownerUserId);
             return AcceptInviteResult.Fail("You cannot accept your own invite.", StatusCodes.Status400BadRequest);
         }
 
@@ -110,20 +126,21 @@ public sealed class InviteService(PawPrintsDbContext db, ILogger<InviteService> 
         );
 
         var now = DateTimeOffset.UtcNow;
+        var createdNewProfile = false;
 
         if (invitee is not null && invitee.CollaboratesWithUserId is long existingOwnerId && existingOwnerId == owner.Id)
         {
-            logger.LogInformation("{InviteeEmail} already shares this owner's log; invite accept is a no-op.", inviteeEmail);
+            outcome = "AlreadyLinkedNoOp";
+            inviteeUserId = invitee.Id;
+            LogAcceptComplete(outcome, inviteeEmail, inviteId, inviteeUserId, ownerUserId);
             return AcceptInviteResult.Ok();
         }
 
         if (invitee is not null && invitee.CollaboratesWithUserId is long otherOwnerId && otherOwnerId != owner.Id)
         {
-            logger.LogWarning(
-                "Invite acceptance rejected: {InviteeEmail} already collaborates with user id {ExistingOwnerId}.",
-                inviteeEmail,
-                otherOwnerId
-            );
+            outcome = "AlreadyCollaboratesElsewhere";
+            inviteeUserId = invitee.Id;
+            LogAcceptComplete(outcome, inviteeEmail, inviteId, inviteeUserId, ownerUserId);
             return AcceptInviteResult.Fail(
                 "This account already shares another puppy log.",
                 StatusCodes.Status409Conflict
@@ -132,6 +149,7 @@ public sealed class InviteService(PawPrintsDbContext db, ILogger<InviteService> 
 
         if (invitee is null)
         {
+            createdNewProfile = true;
             invitee = new PawPrintsUser
             {
                 Email = inviteeEmail,
@@ -143,11 +161,6 @@ public sealed class InviteService(PawPrintsDbContext db, ILogger<InviteService> 
                 CollaboratesWithUserId = owner.Id,
             };
             db.Users.Add(invitee);
-            logger.LogInformation(
-                "Creating PawPrints profile for {InviteeEmail} as collaborator to owner user id {OwnerUserId}.",
-                inviteeEmail,
-                owner.Id
-            );
         }
         else
         {
@@ -159,12 +172,6 @@ public sealed class InviteService(PawPrintsDbContext db, ILogger<InviteService> 
                 db.Events.RemoveRange(invitee.Events);
                 invitee.Events.Clear();
             }
-
-            logger.LogInformation(
-                "Linking existing PawPrints profile for {InviteeEmail} as collaborator to owner user id {OwnerUserId}.",
-                inviteeEmail,
-                owner.Id
-            );
         }
 
         invite.ConsumedAtUtc = now;
@@ -172,14 +179,30 @@ public sealed class InviteService(PawPrintsDbContext db, ILogger<InviteService> 
 
         await db.SaveChangesAsync(cancellationToken);
 
-        logger.LogInformation(
-            "Invite id {InviteId} consumed by user id {InviteeUserId}; collaborator now follows owner user id {OwnerUserId}.",
-            invite.Id,
-            invitee.Id,
-            owner.Id
-        );
+        inviteeUserId = invitee.Id;
+        outcome = createdNewProfile ? "ConsumedNewProfile" : "ConsumedLinkedProfile";
+
+        LogAcceptComplete(outcome, inviteeEmail, inviteId, inviteeUserId, ownerUserId);
 
         return AcceptInviteResult.Ok();
+
+        void LogAcceptComplete(
+            string completedOutcome,
+            string email,
+            long? completedInviteId,
+            long? completedInviteeUserId,
+            long? completedOwnerUserId
+        )
+        {
+            logger.LogInformation(
+                "Collaboration invite accept completed with outcome {Outcome} invitee email {InviteeEmail} invite id {InviteId} invitee user id {InviteeUserId} owner user id {OwnerUserId}",
+                completedOutcome,
+                email,
+                completedInviteId,
+                completedInviteeUserId,
+                completedOwnerUserId
+            );
+        }
     }
 
     private static string HashInviteTokenPlaintext(string tokenPlaintext)
