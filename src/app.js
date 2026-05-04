@@ -2,16 +2,23 @@ import {
   EVENT_TYPES,
   addEventWithDefaults,
   applyStoredEventsSnapshot,
+  applyStoredEventsSnapshotToWindow,
+  clampDateKey,
+  clampOccurredAtForLogDay,
   formatCompactTimeValue,
+  getEventGroupsDescending,
+  getEventsForDate,
+  getEventType,
   getPendingSyncChanges,
   getPuppyAgeLabel,
-  getEventType,
-  getEventsForDate,
-  markSyncCommitted,
   getStoredEvents,
   getTodayKey,
   getTrackingDay,
+  insertEventPreservingOrder,
+  markSyncCommitted,
+  pickSnappedTimeMsBetweenNeighbors,
   removeEvent,
+  shiftDateKey,
   updateEventsTime,
 } from "./events.js";
 import { createApiUrl, createRemoteSync } from "./sync.js";
@@ -138,23 +145,6 @@ function hasRequiredSettings(settings) {
   return Boolean(settings.arrivalDate && settings.birthDate);
 }
 
-function getEventGroups(events) {
-  const groups = new Map();
-
-  events.forEach((event) => {
-    if (!groups.has(event.occurredAt)) {
-      groups.set(event.occurredAt, []);
-    }
-
-    groups.get(event.occurredAt).push(event);
-  });
-
-  return Array.from(groups.entries()).map(([occurredAt, groupEvents]) => ({
-    occurredAt,
-    events: groupEvents,
-  }));
-}
-
 function getLogSummary({ date, dateKey, settings, events }) {
   const day = settings.arrivalDate ? getTrackingDay(settings.arrivalDate, dateKey) : 1;
   const ageLabel = getPuppyAgeLabel(settings.birthDate, dateKey);
@@ -171,7 +161,7 @@ function getLogSummary({ date, dateKey, settings, events }) {
 
 function renderEvents({ eventList, emptyState, logSummary, date, dateKey, settings }) {
   const events = getEventsForDate(window.localStorage, date);
-  const eventGroups = getEventGroups(events);
+  const eventGroups = getEventGroupsDescending(events);
 
   logSummary.textContent = getLogSummary({ date, dateKey, settings, events });
   emptyState.hidden = events.length > 0;
@@ -190,6 +180,14 @@ function renderEvents({ eventList, emptyState, logSummary, date, dateKey, settin
     const eventNames = knownEvents.map(({ eventType }) => eventType.label).join(" + ");
 
     item.innerHTML = `
+      <button
+        type="button"
+        class="event-drag-handle"
+        data-drag-handle
+        aria-label="Drag to reorder ${eventNames}"
+      >
+        ⠿
+      </button>
       <label class="event-time-control">
         <span class="visually-hidden">Time for ${eventNames}</span>
         <input

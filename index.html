@@ -50,11 +50,11 @@
           <h2 id="settings-title">Day</h2>
           <div class="day-nav" aria-label="Log day navigation">
             <button class="day-nav-button" type="button" data-previous-day aria-label="Previous day">
-              -
+              Prev
             </button>
             <p class="log-summary" data-log-summary></p>
             <button class="day-nav-button" type="button" data-next-day aria-label="Next day">
-              +
+              Next
             </button>
           </div>
         </div>
@@ -118,6 +118,9 @@
       <section class="card history" aria-labelledby="today-events-title" data-app-section data-activity-section hidden>
         <div class="section-heading">
           <h2 id="today-events-title">Log</h2>
+          <button class="undo-button" type="button" data-undo disabled aria-label="Undo last log change">
+            Undo
+          </button>
         </div>
         <ol id="event-list" class="event-list" data-event-list></ol>
         <p id="empty-state" class="empty-state" data-empty-state>

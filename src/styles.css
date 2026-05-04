@@ -121,26 +121,41 @@ h2 {
 }
 
 .day-nav {
-  display: inline-flex;
+  display: grid;
+  grid-template-columns: auto minmax(14rem, 1fr) auto;
   gap: 8px;
   align-items: center;
+  width: min(100%, 32rem);
 }
 
 .day-nav-button {
-  display: grid;
-  width: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 64px;
   height: 30px;
-  place-items: center;
+  padding: 0 10px;
   border: 1px solid #fed7aa;
   border-radius: 999px;
   background: #fff;
   cursor: pointer;
-  font-weight: 900;
+  font-size: 0.76rem;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
 }
 
 .day-nav-button:disabled {
   cursor: not-allowed;
   opacity: 0.35;
+}
+
+.day-nav .log-summary {
+  min-width: 0;
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .setup-panel {
@@ -467,9 +482,66 @@ button.primary-link {
 
 .event-list-item {
   display: grid;
-  grid-template-columns: 92px 1fr;
+  grid-template-columns: 44px 92px 1fr;
   align-items: center;
   min-height: 38px;
+}
+
+.event-drag-handle {
+  justify-self: center;
+  width: 36px;
+  height: 32px;
+  border: none;
+  padding: 0;
+  border-radius: 8px;
+  color: #a1826b;
+  background: transparent;
+  cursor: grab;
+  touch-action: none;
+  font-size: 1rem;
+  line-height: 1;
+  letter-spacing: 0.08em;
+}
+
+.event-drag-handle:hover,
+.event-drag-handle:focus-visible {
+  color: #6b4f3c;
+  outline: 2px solid #fdba74;
+  outline-offset: 2px;
+}
+
+.event-list-item.is-dragging {
+  opacity: 0.55;
+}
+
+.event-list-item.is-dragging .event-drag-handle {
+  cursor: grabbing;
+}
+
+.undo-button {
+  min-height: 30px;
+  padding: 0 12px;
+  border: 1px solid #fed7aa;
+  border-radius: 999px;
+  background: #fff;
+  color: #6b4f3c;
+  cursor: pointer;
+  font-size: 0.76rem;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.undo-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.35;
+}
+
+.undo-button:not(:disabled):hover,
+.undo-button:not(:disabled):focus-visible {
+  border-color: #fb923c;
+  outline: 2px solid #fdba74;
+  outline-offset: 2px;
 }
 
 .event-time-input {
@@ -553,5 +625,15 @@ button.primary-link {
 
   .event-buttons {
     grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .day-nav {
+    grid-template-columns: auto minmax(9rem, 1fr) auto;
+    width: 100%;
+  }
+
+  .day-nav-button {
+    min-width: 56px;
+    padding-inline: 8px;
   }
 }

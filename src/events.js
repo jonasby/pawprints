@@ -59,6 +59,25 @@ export function createLocalDate(dateKey) {
   return new Date(year, month - 1, day);
 }
 
+export function shiftDateKey(dateKey, dayOffset) {
+  const date = createLocalDate(dateKey);
+  date.setDate(date.getDate() + dayOffset);
+
+  return getTodayKey(date);
+}
+
+export function clampDateKey(dateKey, minKey, maxKey) {
+  if (minKey && dateKey < minKey) {
+    return minKey;
+  }
+
+  if (maxKey && dateKey > maxKey) {
+    return maxKey;
+  }
+
+  return dateKey;
+}
+
 export function getDaysBetweenDateKeys(startDateKey, endDateKey) {
   const start = createLocalDate(startDateKey);
   const end = createLocalDate(endDateKey);
@@ -280,13 +299,13 @@ export function replaceStoredEvents(storage, events) {
   });
 }
 
-export function applyStoredEventsSnapshot(storage, events = []) {
+export function mergeSnapshotWithLocalStorage(storage, remoteEvents = []) {
   const localEvents = getStoredEvents(storage);
   const localById = new Map(localEvents.map((event) => [event.id, event]));
   const mergedEvents = [];
   const remoteIds = new Set();
 
-  events.forEach((event) => {
+  remoteEvents.forEach((event) => {
     remoteIds.add(event.id);
     const local = localById.get(event.id);
     if (local && local.committed === false) {
@@ -309,7 +328,34 @@ export function applyStoredEventsSnapshot(storage, events = []) {
     }
   });
 
-  replaceStoredEvents(storage, mergedEvents);
+  return mergedEvents;
+}
+
+export function materializeMergedEventsToWindow(storage, mergedEvents, windowMinKey, windowMaxKey) {
+  const filtered = mergedEvents.filter((event) => {
+    if (event.committed === false) {
+      return true;
+    }
+
+    return event.dateKey >= windowMinKey && event.dateKey <= windowMaxKey;
+  });
+
+  replaceStoredEvents(storage, filtered);
+}
+
+export function applyStoredEventsSnapshot(storage, events = []) {
+  const merged = mergeSnapshotWithLocalStorage(storage, events);
+  replaceStoredEvents(storage, merged);
+}
+
+export function applyStoredEventsSnapshotToWindow(
+  storage,
+  remoteEvents,
+  windowMinKey,
+  windowMaxKey,
+) {
+  const merged = mergeSnapshotWithLocalStorage(storage, remoteEvents);
+  materializeMergedEventsToWindow(storage, merged, windowMinKey, windowMaxKey);
 }
 
 export function addEvent(storage, event) {
@@ -388,6 +434,80 @@ export function updateEventsTime(storage, eventIds, timeValue, date = new Date()
   saveEventsForDate(storage, dateKey, events);
 
   return loadEventsForDate(storage, dateKey);
+}
+
+export function pickSnappedTimeMsBetweenNeighbors(prevMs, nextMs, hintMs) {
+  const gap = TEN_MINUTES_IN_MS;
+
+  if (prevMs == null && nextMs == null) {
+    return hintMs;
+  }
+
+  if (prevMs == null) {
+    return nextMs - gap;
+  }
+
+  if (nextMs == null) {
+    return prevMs + gap;
+  }
+
+  const low = prevMs + gap;
+  const high = nextMs - gap;
+
+  if (low <= high) {
+    const clamped = Math.max(low, Math.min(high, hintMs));
+
+    return floorToTenMinutes(new Date(clamped)).getTime();
+  }
+
+  return Math.abs(hintMs - low) <= Math.abs(hintMs - high) ? low : high;
+}
+
+export function clampOccurredAtForLogDay(occurredAt, logDate, now = new Date()) {
+  const dateKey = getTodayKey(logDate);
+  const todayKey = getTodayKey(now);
+  let ms = occurredAt.getTime();
+
+  if (dateKey === todayKey) {
+    ms = Math.min(ms, floorToTenMinutes(now).getTime());
+  }
+
+  const dayStart = new Date(logDate);
+  dayStart.setHours(0, 0, 0, 0);
+  const dayEnd = new Date(logDate);
+  dayEnd.setHours(23, 50, 0, 0);
+
+  ms = Math.max(dayStart.getTime(), Math.min(dayEnd.getTime(), ms));
+
+  return new Date(ms);
+}
+
+export function getEventGroupsDescending(events) {
+  const groups = new Map();
+
+  events.forEach((event) => {
+    if (!groups.has(event.occurredAt)) {
+      groups.set(event.occurredAt, []);
+    }
+
+    groups.get(event.occurredAt).push(event);
+  });
+
+  return Array.from(groups.entries())
+    .sort((first, second) => new Date(second[0]) - new Date(first[0]))
+    .map(([occurredAt, groupEvents]) => ({
+      occurredAt,
+      events: groupEvents,
+    }));
+}
+
+export function insertEventPreservingOrder(storage, event) {
+  const events = loadEventsForDate(storage, event.dateKey);
+  const merged = [...events, normalizeEvent(event)].sort(
+    (first, second) => new Date(second.occurredAt) - new Date(first.occurredAt),
+  );
+
+  saveEventsForDate(storage, event.dateKey, merged);
 }
 
 export function removeEvent(storage, eventId, date = new Date()) {
