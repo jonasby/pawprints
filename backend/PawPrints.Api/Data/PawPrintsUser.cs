@@ -22,5 +22,9 @@ public sealed class PawPrintsUser
 
     public List<PuppyEvent> Events { get; set; } = [];
 
+    public List<PuppyPrediction> Predictions { get; set; } = [];
+
+    public List<NotificationOutboxItem> NotificationOutboxItems { get; set; } = [];
+
     public List<PawPrintsUser> Collaborators { get; set; } = [];
 }

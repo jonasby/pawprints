@@ -6,6 +6,7 @@ namespace PawPrints.Api.Sync;
 
 public sealed class SnapshotSyncService(
     PawPrintsDbContext db,
+    PredictionEvaluator predictionEvaluator,
     ILogger<SnapshotSyncService> logger
 )
 {
@@ -140,6 +141,7 @@ public sealed class SnapshotSyncService(
                 newOwner.Events.Count,
                 newOwner.Id
             );
+            await predictionEvaluator.EvaluateForUserAsync(newOwner.Id, cancellationToken);
             return;
         }
 
@@ -163,6 +165,7 @@ public sealed class SnapshotSyncService(
                 actor.Events.Count,
                 actor.Id
             );
+            await predictionEvaluator.EvaluateForUserAsync(actor.Id, cancellationToken);
             return;
         }
 
@@ -194,6 +197,7 @@ public sealed class SnapshotSyncService(
                 actor.Events.Count,
                 actor.Id
             );
+            await predictionEvaluator.EvaluateForUserAsync(actor.Id, cancellationToken);
             return;
         }
 
@@ -219,6 +223,7 @@ public sealed class SnapshotSyncService(
             owner.Events.Count,
             owner.Id
         );
+        await predictionEvaluator.EvaluateForUserAsync(owner.Id, cancellationToken);
     }
 
     private static IReadOnlyCollection<SyncEventRequest> GetIncomingUpserts(SyncSnapshotRequest snapshot)

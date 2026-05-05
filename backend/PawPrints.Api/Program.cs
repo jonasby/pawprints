@@ -9,6 +9,7 @@ using PawPrints.Api.Data;
 using PawPrints.Api.Import;
 using PawPrints.Api.Invites;
 using PawPrints.Api.Middleware;
+using PawPrints.Api.Predictions;
 using Serilog;
 using Serilog.Formatting.Compact;
 
@@ -38,9 +39,14 @@ try
     builder.Services.AddEndpointsApiExplorer();
     builder.Services.AddSwaggerGen();
     builder.Services.AddHttpContextAccessor();
+    builder.Services.AddSingleton(TimeProvider.System);
     builder.Services.AddScoped<CurrentUser>();
     builder.Services.AddScoped<SnapshotSyncService>();
     builder.Services.AddScoped<InviteService>();
+    builder.Services.AddScoped<PredictionEvaluator>();
+    builder.Services.AddScoped<PredictionQueryService>();
+    builder.Services.AddScoped<PredictionNotificationService>();
+    builder.Services.AddHostedService<PredictionRefreshService>();
     builder.Services.AddHttpClient<ImportTokenResolveService>();
     builder.Services.AddCors(options =>
     {
@@ -451,6 +457,40 @@ try
         }
     );
 
+    app.MapGet(
+        "/api/predictions",
+        [Authorize(Policy = AuthenticatedPawPrintsUserPolicy)]
+        async (
+            CurrentUser currentUser,
+            PredictionQueryService predictionQueries,
+            CancellationToken cancellationToken
+        ) =>
+        {
+            var predictions = await predictionQueries.GetActivePredictionsAsync(
+                currentUser.Email,
+                cancellationToken
+            );
+            return Results.Ok(predictions);
+        }
+    );
+
+    app.MapGet(
+        "/api/notifications/due",
+        [Authorize(Policy = AuthenticatedPawPrintsUserPolicy)]
+        async (
+            CurrentUser currentUser,
+            PredictionNotificationService predictionNotifications,
+            CancellationToken cancellationToken
+        ) =>
+        {
+            var notifications = await predictionNotifications.ClaimDueNotificationsAsync(
+                currentUser.Email,
+                cancellationToken
+            );
+            return Results.Ok(notifications);
+        }
+    );
+
     app.MapPost(
         "/api/import/resolve-tokens",
         [Authorize(Policy = AuthenticatedPawPrintsUserPolicy)]
@@ -515,7 +555,9 @@ public static partial class ProgramConfiguration
         var tableNames = existingTables.ToHashSet(StringComparer.OrdinalIgnoreCase);
         return !tableNames.Contains("Users")
             || !tableNames.Contains("Events")
-            || !tableNames.Contains("Invites");
+            || !tableNames.Contains("Invites")
+            || !tableNames.Contains("Predictions")
+            || !tableNames.Contains("NotificationOutbox");
     }
 
     public static async Task<IReadOnlyList<string>> GetSqliteTableNamesAsync(

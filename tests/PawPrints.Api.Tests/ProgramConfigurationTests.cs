@@ -65,7 +65,7 @@ public sealed class ProgramConfigurationTests
     public void GivenSqliteRequiredTablesPresent_WhenCheckingSchemaRecovery_ThenRecreateIsNotRequired()
     {
         var shouldRecreate = ProgramConfiguration.ShouldRecreateSqliteSchema(
-            ["Users", "Events", "Invites", "__EFMigrationsHistory"]
+            ["Users", "Events", "Invites", "Predictions", "NotificationOutbox", "__EFMigrationsHistory"]
         );
 
         Assert.False(shouldRecreate);

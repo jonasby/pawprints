@@ -44,7 +44,15 @@ async function createApiError(response, path) {
 
 export function createRemoteSync(
   storage,
-  { getSettings, loadEvents, getPendingChanges, markChangesCommitted, onStatusChange, onInFlightChange },
+  {
+    getSettings,
+    loadEvents,
+    getPendingChanges,
+    markChangesCommitted,
+    onStatusChange,
+    onInFlightChange,
+    onSyncComplete,
+  },
 ) {
   let pendingSyncId;
   const authPath = "/api/auth/me";
@@ -89,6 +97,7 @@ export function createRemoteSync(
         upsertIds: pendingChanges.upserts.map((event) => event.id),
         deletedEventIds: pendingChanges.deletedEventIds,
       });
+      onSyncComplete?.();
       onStatusChange?.("Saved");
     } finally {
       onInFlightChange?.(false);
@@ -191,6 +200,34 @@ export function createRemoteSync(
         error.responseText = raw.slice(0, 2000);
         throw error;
       }
+    },
+    async loadPredictions() {
+      const path = "/api/predictions";
+      const response = await fetch(createApiUrl(path), { credentials: "include" });
+      if (response.status === 401 || response.status === 403) {
+        onStatusChange?.("Sign in to sync");
+        return [];
+      }
+
+      if (!response.ok) {
+        throw await createApiError(response, path);
+      }
+
+      return response.json();
+    },
+    async claimDueNotifications() {
+      const path = "/api/notifications/due";
+      const response = await fetch(createApiUrl(path), { credentials: "include" });
+      if (response.status === 401 || response.status === 403) {
+        onStatusChange?.("Sign in to sync");
+        return [];
+      }
+
+      if (!response.ok) {
+        throw await createApiError(response, path);
+      }
+
+      return response.json();
     },
     async signOut() {
       await fetch(createApiUrl("/api/auth/logout"), {
