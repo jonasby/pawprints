@@ -93,29 +93,24 @@ public sealed class PredictionEvaluator(
 
         ResolveInvalidActivePredictions(user, events, now);
 
-        var createdOrUpdated = 0;
-        if (EvaluateNapWakePrediction(user, events, now))
-        {
-            createdOrUpdated++;
-        }
-
-        if (EvaluatePoopNeedPrediction(user, events, now))
-        {
-            createdOrUpdated++;
-        }
+        var activePredictionsBefore = user.Predictions.Count(prediction => prediction.Status == PredictionConstants.StatusActive);
+        EvaluateNapWakePrediction(user, events, now);
+        EvaluatePoopNeedPrediction(user, events, now);
 
         await db.SaveChangesAsync(cancellationToken);
 
         logger.LogInformation(
             "Prediction evaluation completed with outcome {Outcome} owner user id {OwnerUserId} active prediction count {ActivePredictionCount} notification pending count {PendingNotificationCount}",
-            createdOrUpdated > 0 ? "PredictionsUpdated" : "NoActivePredictionChanges",
+            user.Predictions.Count(prediction => prediction.Status == PredictionConstants.StatusActive) != activePredictionsBefore
+                ? "ActivePredictionCountChanged"
+                : "PredictionsEvaluated",
             user.Id,
             user.Predictions.Count(prediction => prediction.Status == PredictionConstants.StatusActive),
             user.NotificationOutboxItems.Count(notification => notification.SentAtUtc == null && notification.CancelledAtUtc == null)
         );
     }
 
-    private bool EvaluateNapWakePrediction(
+    private void EvaluateNapWakePrediction(
         PawPrintsUser user,
         IReadOnlyList<PuppyEvent> events,
         DateTimeOffset now
@@ -124,7 +119,7 @@ public sealed class PredictionEvaluator(
         var latestNap = events.LastOrDefault(storedEvent => storedEvent.Type == "nap");
         if (latestNap is null)
         {
-            return false;
+            return;
         }
 
         var wakeAfterLatestNap = events.FirstOrDefault(storedEvent =>
@@ -139,14 +134,14 @@ public sealed class PredictionEvaluator(
                 wakeAfterLatestNap.OccurredAt,
                 now
             );
-            return false;
+            return;
         }
 
         var napDurations = GetCompletedNapDurations(events, latestNap.OccurredAt).ToArray();
         if (napDurations.Length < MinimumHistorySamples)
         {
             CancelPredictionsByType(user, PredictionConstants.NapWakeType, now, "not-enough-history");
-            return false;
+            return;
         }
 
         var medianDuration = MedianTimeSpan(napDurations);
@@ -182,11 +177,9 @@ public sealed class PredictionEvaluator(
             $"Wake likely around {FormatLocalishTime(bestGuess)}; usual window {FormatLocalishTime(windowStart)}-{FormatLocalishTime(windowEnd)}.",
             now
         );
-
-        return true;
     }
 
-    private bool EvaluatePoopNeedPrediction(
+    private void EvaluatePoopNeedPrediction(
         PawPrintsUser user,
         IReadOnlyList<PuppyEvent> events,
         DateTimeOffset now
@@ -200,7 +193,7 @@ public sealed class PredictionEvaluator(
         if (latestEat is null || latestWake is null)
         {
             CancelPredictionsByType(user, PredictionConstants.PoopNeedType, now, "missing-food-or-wake");
-            return false;
+            return;
         }
 
         var triggerAt = latestEat.OccurredAt >= latestWake.OccurredAt
@@ -213,14 +206,14 @@ public sealed class PredictionEvaluator(
         if (latestPoop is not null && latestPoop.OccurredAt > triggerAt)
         {
             ResolvePredictions(user, PredictionConstants.PoopNeedType, null, latestPoop.OccurredAt, now);
-            return false;
+            return;
         }
 
         var samples = GetPoopAfterFoodSamples(events, triggerAt).ToArray();
         if (samples.Length < MinimumHistorySamples)
         {
             CancelPredictionsByType(user, PredictionConstants.PoopNeedType, now, "not-enough-history");
-            return false;
+            return;
         }
 
         var offsets = samples.Select(sample => sample.PoopAt - sample.TriggerAt).ToArray();
@@ -234,7 +227,7 @@ public sealed class PredictionEvaluator(
         if (now > windowEnd.AddMinutes(30))
         {
             CancelPredictionsByType(user, PredictionConstants.PoopNeedType, now, "window-expired");
-            return false;
+            return;
         }
 
         var minutesUntilWindowEnd = Math.Max(0, (decimal)(windowEnd - now).TotalMinutes);
@@ -271,8 +264,6 @@ public sealed class PredictionEvaluator(
             $"Poo likely in the {FormatLocalishTime(windowStart)}-{FormatLocalishTime(windowEnd)} window.",
             now
         );
-
-        return true;
     }
 
     private PuppyPrediction UpsertPrediction(
@@ -506,7 +497,10 @@ public sealed class PredictionEvaluator(
     )
     {
         var notification = user.NotificationOutboxItems.SingleOrDefault(candidate =>
-            candidate.Prediction == prediction
+            (
+                candidate.Prediction == prediction
+                || (prediction.Id > 0 && candidate.PredictionId == prediction.Id)
+            )
             && candidate.Type == prediction.Type);
 
         if (notification is null)
@@ -527,7 +521,6 @@ public sealed class PredictionEvaluator(
         notification.PayloadJson = JsonSerializer.Serialize(new
         {
             predictionType = prediction.Type,
-            predictionId = prediction.Id,
             windowStart = prediction.WindowStartUtc,
             bestGuessAt = prediction.BestGuessAtUtc,
             windowEnd = prediction.WindowEndUtc,
