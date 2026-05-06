@@ -1,7 +1,7 @@
 const SYNC_DEBOUNCE_MS = 500;
 
 export function getApiBaseUrl() {
-  return (import.meta.env.VITE_API_BASE_URL ?? "").replace(/\/$/, "");
+  return (import.meta.env?.VITE_API_BASE_URL ?? "").replace(/\/$/, "");
 }
 
 export function createApiUrl(path) {
@@ -44,7 +44,16 @@ async function createApiError(response, path) {
 
 export function createRemoteSync(
   storage,
-  { getSettings, loadEvents, getPendingChanges, markChangesCommitted, onStatusChange, onInFlightChange },
+  {
+    getSettings,
+    loadEvents,
+    getPendingChanges,
+    markChangesCommitted,
+    onStatusChange,
+    onInFlightChange,
+    onEventsInFlightChange,
+    onEventsSynced,
+  },
 ) {
   let pendingSyncId;
   const authPath = "/api/auth/me";
@@ -55,11 +64,16 @@ export function createRemoteSync(
       return;
     }
 
-    onInFlightChange?.(true);
-    onStatusChange?.("Saving...");
-    const pendingChanges = getPendingChanges?.(storage) ?? { upserts: [], deletedEventIds: [] };
+    let pendingUpsertIds = [];
 
     try {
+      const pendingChanges = getPendingChanges?.(storage) ?? { upserts: [], deletedEventIds: [] };
+      pendingUpsertIds = pendingChanges.upserts.map((event) => event.id);
+
+      onInFlightChange?.(true);
+      onEventsInFlightChange?.(pendingUpsertIds, true);
+      onStatusChange?.("Saving...");
+
       const response = await fetch(createApiUrl("/api/sync"), {
         method: "PUT",
         headers: {
@@ -86,11 +100,13 @@ export function createRemoteSync(
       }
 
       markChangesCommitted?.(storage, {
-        upsertIds: pendingChanges.upserts.map((event) => event.id),
+        upsertIds: pendingUpsertIds,
         deletedEventIds: pendingChanges.deletedEventIds,
       });
+      onEventsSynced?.(pendingUpsertIds);
       onStatusChange?.("Saved");
     } finally {
+      onEventsInFlightChange?.(pendingUpsertIds, false);
       onInFlightChange?.(false);
     }
   }
