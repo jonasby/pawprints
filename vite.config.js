@@ -17,6 +17,12 @@ export default defineConfig(({ command }) => ({
         changeOrigin: false,
         secure: false,
       },
+      "/hubs": {
+        target: process.env.VITE_API_PROXY_TARGET ?? "https://localhost:7233",
+        changeOrigin: false,
+        secure: false,
+        ws: true,
+      },
     },
   },
 }));

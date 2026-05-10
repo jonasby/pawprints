@@ -1,14 +1,15 @@
 using System.Net;
-using System.Net.Http.Json;
 using System.Security.Claims;
 using System.Text.Encodings.Web;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.AspNetCore.SignalR;
+using Microsoft.AspNetCore.SignalR.Client;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using PawPrints.Api.Contracts;
@@ -22,22 +23,26 @@ public sealed class SyncApiTests
     public async Task GivenNoLogin_WhenSyncingSnapshot_ThenItIsRejected()
     {
         await using var application = new PawPrintsApiApplication();
-        using var client = application.CreateClient();
+        var hub = SyncHubTestConnections.Create(application, email: null);
 
-        var response = await client.PutAsJsonAsync("/api/sync", CreateSnapshot());
-
-        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+        await hub.StartAsync();
+        try
+        {
+            await Assert.ThrowsAsync<HubException>(() => hub.InvokeAsync("GetSnapshot"));
+        }
+        finally
+        {
+            await hub.StopAsync();
+        }
     }
 
     [Fact]
     public async Task GivenAnyGoogleAccount_WhenSyncingSnapshot_ThenUserProfileAndEventsAreStored()
     {
         await using var application = new PawPrintsApiApplication();
-        using var client = application.CreateAuthenticatedClient("someone.else@gmail.com");
 
-        var response = await client.PutAsJsonAsync("/api/sync", CreateSnapshot());
+        await SyncHubTestConnections.PushSnapshotAsync(application, "someone.else@gmail.com", CreateSnapshot());
 
-        response.EnsureSuccessStatusCode();
         using var scope = application.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<PawPrintsDbContext>();
         var user = await db.Users.Include(storedUser => storedUser.Events).SingleAsync();
@@ -49,11 +54,9 @@ public sealed class SyncApiTests
     public async Task GivenAllowedGoogleAccount_WhenSyncingSnapshot_ThenUserProfileAndEventsAreStored()
     {
         await using var application = new PawPrintsApiApplication();
-        using var client = application.CreateAuthenticatedClient("jon.asby@gmail.com");
 
-        var response = await client.PutAsJsonAsync("/api/sync", CreateSnapshot());
+        await SyncHubTestConnections.PushSnapshotAsync(application, "jon.asby@gmail.com", CreateSnapshot());
 
-        response.EnsureSuccessStatusCode();
         using var scope = application.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<PawPrintsDbContext>();
         var user = await db.Users.Include(storedUser => storedUser.Events).SingleAsync();
@@ -81,15 +84,14 @@ public sealed class SyncApiTests
     public async Task GivenExistingEvents_WhenSyncingAChangedSnapshot_ThenTheStoredSnapshotIsReplaced()
     {
         await using var application = new PawPrintsApiApplication();
-        using var client = application.CreateAuthenticatedClient("jon.asby@gmail.com");
-        await client.PutAsJsonAsync("/api/sync", CreateSnapshot());
+
+        await SyncHubTestConnections.PushSnapshotAsync(application, "jon.asby@gmail.com", CreateSnapshot());
 
         var changedSnapshot = CreateSnapshot(
             new SyncEventRequest("evt-food", "eat", DateTimeOffset.Parse("2026-04-26T12:00:00Z"), "2026-04-26")
         );
-        var response = await client.PutAsJsonAsync("/api/sync", changedSnapshot);
+        await SyncHubTestConnections.PushSnapshotAsync(application, "jon.asby@gmail.com", changedSnapshot);
 
-        response.EnsureSuccessStatusCode();
         using var scope = application.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<PawPrintsDbContext>();
         var user = await db.Users.Include(storedUser => storedUser.Events).SingleAsync();
@@ -102,14 +104,25 @@ public sealed class SyncApiTests
     public async Task GivenStoredSnapshot_WhenFetchingSnapshot_ThenItReturnsSettingsAndEvents()
     {
         await using var application = new PawPrintsApiApplication();
-        using var client = application.CreateAuthenticatedClient("jon.asby@gmail.com");
-        await client.PutAsJsonAsync("/api/sync", CreateSnapshot());
 
-        var snapshot = await client.GetFromJsonAsync<SyncSnapshotRequest>("/api/sync");
+        await SyncHubTestConnections.PushSnapshotAsync(application, "jon.asby@gmail.com", CreateSnapshot());
+
+        var hub = SyncHubTestConnections.Create(application, "jon.asby@gmail.com");
+        await hub.StartAsync();
+        SyncSnapshotRequest? snapshot;
+        try
+        {
+            snapshot = await hub.InvokeAsync<SyncSnapshotRequest?>("GetSnapshot");
+        }
+        finally
+        {
+            await hub.StopAsync();
+        }
 
         Assert.NotNull(snapshot);
         Assert.Equal("2026-04-19", snapshot.Settings.ArrivalDate);
         Assert.Equal("2026-02-22", snapshot.Settings.BirthDate);
+        Assert.NotNull(snapshot.Events);
         Assert.Equal(
             ["evt-sleep"],
             snapshot.Events
@@ -131,8 +144,8 @@ public sealed class SyncApiTests
     public async Task GivenStoredEvents_WhenSyncingDeltaUpserts_ThenOnlyTargetedEventsAreUpdated()
     {
         await using var application = new PawPrintsApiApplication();
-        using var client = application.CreateAuthenticatedClient("jon.asby@gmail.com");
-        await client.PutAsJsonAsync("/api/sync", CreateSnapshot());
+
+        await SyncHubTestConnections.PushSnapshotAsync(application, "jon.asby@gmail.com", CreateSnapshot());
 
         var delta = new SyncSnapshotRequest(
             new SyncSettingsRequest("2026-04-19", "2026-02-22"),
@@ -143,8 +156,7 @@ public sealed class SyncApiTests
             ]
         );
 
-        var response = await client.PutAsJsonAsync("/api/sync", delta);
-        response.EnsureSuccessStatusCode();
+        await SyncHubTestConnections.PushSnapshotAsync(application, "jon.asby@gmail.com", delta);
 
         using var scope = application.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<PawPrintsDbContext>();
@@ -163,16 +175,15 @@ public sealed class SyncApiTests
     public async Task GivenStoredEvents_WhenSyncingDeltaDeletes_ThenOnlyTargetedEventsAreRemoved()
     {
         await using var application = new PawPrintsApiApplication();
-        using var client = application.CreateAuthenticatedClient("jon.asby@gmail.com");
-        await client.PutAsJsonAsync("/api/sync", CreateSnapshot());
+
+        await SyncHubTestConnections.PushSnapshotAsync(application, "jon.asby@gmail.com", CreateSnapshot());
 
         var delta = new SyncSnapshotRequest(
             new SyncSettingsRequest("2026-04-19", "2026-02-22"),
             DeletedEventIds: ["evt-sleep"]
         );
 
-        var response = await client.PutAsJsonAsync("/api/sync", delta);
-        response.EnsureSuccessStatusCode();
+        await SyncHubTestConnections.PushSnapshotAsync(application, "jon.asby@gmail.com", delta);
 
         using var scope = application.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<PawPrintsDbContext>();

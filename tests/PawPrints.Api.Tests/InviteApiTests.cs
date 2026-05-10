@@ -18,7 +18,7 @@ public sealed class InviteApiTests
         await using var application = new PawPrintsApiApplication();
         using var client = application.CreateAuthenticatedClient("owner@gmail.com");
 
-        await client.PutAsJsonAsync("/api/sync", InviteApiTestData.CreateSnapshot());
+        await SyncHubTestConnections.PushSnapshotAsync(application, "owner@gmail.com", InviteApiTestData.CreateSnapshot());
 
         var response = await client.PostAsync("/api/invites", content: null);
 
@@ -34,7 +34,7 @@ public sealed class InviteApiTests
     {
         await using var application = new PawPrintsApiApplication();
         using var ownerClient = application.CreateAuthenticatedClient("owner@gmail.com");
-        await ownerClient.PutAsJsonAsync("/api/sync", InviteApiTestData.CreateSnapshot());
+        await SyncHubTestConnections.PushSnapshotAsync(application, "owner@gmail.com", InviteApiTestData.CreateSnapshot());
 
         var inviteResponse = await ownerClient.PostAsync("/api/invites", content: null);
         var invite = await inviteResponse.Content.ReadFromJsonAsync<CreateInviteResponse>();
@@ -55,8 +55,7 @@ public sealed class InviteApiTests
                 "2026-04-26"
             )
         );
-        var syncResponse = await collaboratorClient.PutAsJsonAsync("/api/sync", changedSnapshot);
-        syncResponse.EnsureSuccessStatusCode();
+        await SyncHubTestConnections.PushSnapshotAsync(application, "helper@gmail.com", changedSnapshot);
 
         using var scope = application.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<PawPrintsDbContext>();
@@ -73,7 +72,7 @@ public sealed class InviteApiTests
     {
         await using var application = new PawPrintsApiApplication();
         using var ownerClient = application.CreateAuthenticatedClient("owner@gmail.com");
-        await ownerClient.PutAsJsonAsync("/api/sync", InviteApiTestData.CreateSnapshot());
+        await SyncHubTestConnections.PushSnapshotAsync(application, "owner@gmail.com", InviteApiTestData.CreateSnapshot());
         var inviteResponse = await ownerClient.PostAsync("/api/invites", content: null);
         var invite = await inviteResponse.Content.ReadFromJsonAsync<CreateInviteResponse>();
         Assert.NotNull(invite);
