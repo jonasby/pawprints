@@ -49,19 +49,48 @@ public sealed class PuppyAnalyticsApiTests
         Assert.Equal(0, april25.Poops);
         Assert.Equal(0, april25.Wees);
         Assert.Equal(540, april25.SleepMinutes);
-        Assert.Equal(0, april25.NapMinutes);
+        Assert.Null(april25.NapMinutes);
 
         var april26 = Assert.Single(analytics.Days, day => day.DateKey == "2026-04-26");
         Assert.Equal(1, april26.Poops);
         Assert.Equal(2, april26.Wees);
-        Assert.Equal(0, april26.SleepMinutes);
+        Assert.Null(april26.SleepMinutes);
         Assert.Equal(70, april26.NapMinutes);
 
         var april28 = Assert.Single(analytics.Days, day => day.DateKey == "2026-04-28");
         Assert.Equal(0, april28.Poops);
         Assert.Equal(1, april28.Wees);
-        Assert.Equal(0, april28.SleepMinutes);
-        Assert.Equal(0, april28.NapMinutes);
+        Assert.Null(april28.SleepMinutes);
+        Assert.Null(april28.NapMinutes);
+    }
+
+    [Fact]
+    public async Task GivenSleepWithoutFollowingMorningEvent_WhenFetchingPuppyAnalytics_ThenSleepDurationIsMissing()
+    {
+        await using var application = new PawPrintsApiApplication();
+        using var client = application.CreateAuthenticatedClient("owner@gmail.com");
+
+        await client.PutAsJsonAsync("/api/sync", PuppyAnalyticsTestData.CreateSnapshot(
+            new SyncEventRequest("pee-may6", "pee", DateTimeOffset.Parse("2026-05-06T20:30:00Z"), "2026-05-06"),
+            new SyncEventRequest("sleep-may6", "sleep", DateTimeOffset.Parse("2026-05-06T22:30:00Z"), "2026-05-06"),
+            new SyncEventRequest("pee-may7", "pee", DateTimeOffset.Parse("2026-05-07T12:00:00Z"), "2026-05-07")
+        ));
+
+        var analytics = await client.GetFromJsonAsync<PuppyAnalyticsResponse>("/api/puppy-analytics");
+
+        Assert.NotNull(analytics);
+        Assert.Equal(
+            ["2026-05-06", "2026-05-07"],
+            analytics.Days.Select(day => day.DateKey).ToArray()
+        );
+
+        var may6 = Assert.Single(analytics.Days, day => day.DateKey == "2026-05-06");
+        Assert.Equal(1, may6.Wees);
+        Assert.Null(may6.SleepMinutes);
+
+        var may7 = Assert.Single(analytics.Days, day => day.DateKey == "2026-05-07");
+        Assert.Equal(1, may7.Wees);
+        Assert.Null(may7.SleepMinutes);
     }
 
     [Fact]
@@ -95,7 +124,7 @@ public sealed class PuppyAnalyticsApiTests
         var may7 = Assert.Single(analytics.Days, day => day.DateKey == "2026-05-07");
         Assert.Equal(1, may7.Poops);
         Assert.Equal(2, may7.Wees);
-        Assert.Equal(0, may7.SleepMinutes);
+        Assert.Null(may7.SleepMinutes);
     }
 
     [Fact]
@@ -126,7 +155,7 @@ public sealed class PuppyAnalyticsApiTests
 
         var may7 = Assert.Single(analytics.Days, day => day.DateKey == "2026-05-07");
         Assert.Equal(2, may7.Wees);
-        Assert.Equal(0, may7.SleepMinutes);
+        Assert.Null(may7.SleepMinutes);
     }
 
     [Fact]
@@ -161,7 +190,7 @@ public sealed class PuppyAnalyticsApiTests
         Assert.Equal(480, sleepDay.SleepMinutes);
         var activityDay = Assert.Single(analytics.Days, day => day.DateKey == "2026-04-26");
         Assert.Equal(1, activityDay.Poops);
-        Assert.Equal(0, activityDay.SleepMinutes);
+        Assert.Null(activityDay.SleepMinutes);
     }
 
     private sealed record PuppyAnalyticsResponse(PuppyAnalyticsDayResponse[] Days);
@@ -170,8 +199,8 @@ public sealed class PuppyAnalyticsApiTests
         string DateKey,
         int Poops,
         int Wees,
-        int SleepMinutes,
-        int NapMinutes
+        int? SleepMinutes,
+        int? NapMinutes
     );
 }
 

@@ -155,7 +155,11 @@ function formatDateLabel(dateKey) {
 }
 
 function formatDuration(minutes) {
-  if (!minutes) {
+  if (!hasMetricValue(minutes)) {
+    return "No data";
+  }
+
+  if (minutes === 0) {
     return "0m";
   }
 
@@ -168,8 +172,25 @@ function formatDuration(minutes) {
   return remainingMinutes === 0 ? `${hours}h` : `${hours}h ${remainingMinutes}m`;
 }
 
-function formatAverageDuration(totalMinutes, dayCount) {
-  return formatDuration(dayCount > 0 ? Math.round(totalMinutes / dayCount) : 0);
+function hasMetricValue(value) {
+  return typeof value === "number" && Number.isFinite(value);
+}
+
+function getDurationAverage(days, key) {
+  const values = days.map((day) => day[key]).filter(hasMetricValue);
+  if (!values.length) {
+    return null;
+  }
+
+  const total = values.reduce((sum, value) => sum + value, 0);
+  return {
+    averageMinutes: Math.round(total / values.length),
+    count: values.length,
+  };
+}
+
+function pluralize(count, singular, plural = `${singular}s`) {
+  return count === 1 ? singular : plural;
 }
 
 function createSvgElement(tagName, attributes = {}) {
@@ -205,19 +226,25 @@ function renderAnalyticsSummary(container, days) {
 
   const totals = days.reduce(
     (accumulator, day) => ({
-      poops: accumulator.poops + day.poops,
-      wees: accumulator.wees + day.wees,
-      sleepMinutes: accumulator.sleepMinutes + day.sleepMinutes,
-      napMinutes: accumulator.napMinutes + day.napMinutes,
+      poops: accumulator.poops + (day.poops ?? 0),
+      wees: accumulator.wees + (day.wees ?? 0),
     }),
-    { poops: 0, wees: 0, sleepMinutes: 0, napMinutes: 0 },
+    { poops: 0, wees: 0 },
   );
+  const sleepAverage = getDurationAverage(days, "sleepMinutes");
+  const napAverage = getDurationAverage(days, "napMinutes");
+  const sleepHint = sleepAverage
+    ? `Valid ${pluralize(sleepAverage.count, "night")}: ${sleepAverage.count}`
+    : "No valid sleep nights";
+  const napHint = napAverage
+    ? `Valid nap ${pluralize(napAverage.count, "day")}: ${napAverage.count}`
+    : "No valid nap days";
 
   container.append(
-    createSummaryCard("Poops", String(totals.poops), `${days.length} tracked day${days.length === 1 ? "" : "s"}`),
+    createSummaryCard("Poops", String(totals.poops), `Tracked days: ${days.length}`),
     createSummaryCard("Wees", String(totals.wees), "Total wee events"),
-    createSummaryCard("Sleep", formatAverageDuration(totals.sleepMinutes, days.length), "Average per tracked day"),
-    createSummaryCard("Naps", formatAverageDuration(totals.napMinutes, days.length), "Average per tracked day"),
+    createSummaryCard("Sleep", formatDuration(sleepAverage?.averageMinutes), sleepHint),
+    createSummaryCard("Naps", formatDuration(napAverage?.averageMinutes), napHint),
   );
 }
 
@@ -232,14 +259,18 @@ function renderAnalyticsChart(container, days) {
   const margin = { top: 34, right: 58, bottom: 68, left: 46 };
   const plotWidth = chartWidth - margin.left - margin.right;
   const plotHeight = chartHeight - margin.top - margin.bottom;
+  const plotXPadding = Math.min(24, plotWidth / 8);
   const maxCount = Math.max(1, ...days.flatMap((day) => [day.poops, day.wees]));
-  const rawMaxDuration = Math.max(60, ...days.flatMap((day) => [day.sleepMinutes, day.napMinutes]));
+  const durationValues = days
+    .flatMap((day) => [day.sleepMinutes, day.napMinutes])
+    .filter(hasMetricValue);
+  const rawMaxDuration = Math.max(60, ...durationValues);
   const maxDuration = Math.ceil(rawMaxDuration / 60) * 60;
   const clampMetric = (value, maxValue) => Math.max(0, Math.min(maxValue, Number(value) || 0));
   const xForIndex = (index) =>
     days.length === 1
       ? margin.left + plotWidth / 2
-      : margin.left + (plotWidth * index) / (days.length - 1);
+      : margin.left + plotXPadding + ((plotWidth - plotXPadding * 2) * index) / (days.length - 1);
   const yForCount = (value) => margin.top + plotHeight - (clampMetric(value, maxCount) / maxCount) * plotHeight;
   const yForDuration = (value) => margin.top + plotHeight - (clampMetric(value, maxDuration) / maxDuration) * plotHeight;
   const series = [
@@ -347,20 +378,47 @@ function renderAnalyticsChart(container, days) {
   });
 
   series.forEach((item) => {
-    const points = days.map((day, index) => `${xForIndex(index)},${item.y(day[item.key])}`).join(" ");
-    svg.append(createSvgElement("polyline", {
-      class: "analytics-series-line",
-      points,
-      stroke: item.color,
-      "clip-path": `url(#${clipId})`,
-    }));
+    const pointGroups = [];
+    let currentGroup = [];
+    let visiblePointCount = 0;
+    days.forEach((day, index) => {
+      const value = day[item.key];
+      const hasValue = item.key === "poops" || item.key === "wees" || hasMetricValue(value);
+      if (!hasValue) {
+        if (currentGroup.length) {
+          pointGroups.push(currentGroup);
+          currentGroup = [];
+        }
+        return;
+      }
+
+      visiblePointCount += 1;
+      currentGroup.push(`${xForIndex(index)},${item.y(value)}`);
+    });
+
+    if (currentGroup.length) {
+      pointGroups.push(currentGroup);
+    }
+
+    pointGroups.forEach((points) => {
+      svg.append(createSvgElement("polyline", {
+        class: "analytics-series-line",
+        points: points.join(" "),
+        stroke: item.color,
+        "clip-path": `url(#${clipId})`,
+      }));
+    });
 
     days.forEach((day, index) => {
+      if (item.key !== "poops" && item.key !== "wees" && !hasMetricValue(day[item.key])) {
+        return;
+      }
+
       svg.append(createSvgElement("circle", {
         class: "analytics-series-point",
         cx: xForIndex(index),
         cy: item.y(day[item.key]),
-        r: 4,
+        r: visiblePointCount === 1 ? 5.5 : 4,
         fill: item.color,
         "clip-path": `url(#${clipId})`,
       }));
@@ -883,7 +941,7 @@ export function renderPuppyLog() {
       return;
     }
 
-    analyticsStatus.textContent = `${days.length} tracked day${days.length === 1 ? "" : "s"} with activity.`;
+    analyticsStatus.textContent = `${days.length} tracked ${pluralize(days.length, "day")} with activity.`;
     renderAnalyticsSummary(analyticsSummary, days);
     renderAnalyticsChart(analyticsChart, days);
     renderAnalyticsTable(analyticsTable, days);

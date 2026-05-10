@@ -106,8 +106,8 @@ public sealed class PuppyAnalyticsService(
                 entry.Key.ToString("yyyy-MM-dd"),
                 entry.Value.Poops,
                 entry.Value.Wees,
-                entry.Value.SleepMinutes,
-                entry.Value.NapMinutes
+                entry.Value.HasSleepData ? entry.Value.SleepMinutes : null,
+                entry.Value.HasNapData ? entry.Value.NapMinutes : null
             ))
             .ToArray();
     }
@@ -148,7 +148,9 @@ public sealed class PuppyAnalyticsService(
             var duration = GetRoundedMinutes(openSleep.OccurredAt, storedEvent.OccurredAt);
             if (duration > 0)
             {
-                GetMetrics(metricsByDate, activeNightDate ?? openSleep.DateKey).SleepMinutes += duration;
+                var metrics = GetMetrics(metricsByDate, activeNightDate ?? openSleep.DateKey);
+                metrics.SleepMinutes += duration;
+                metrics.HasSleepData = true;
             }
 
             openSleep = null;
@@ -187,7 +189,9 @@ public sealed class PuppyAnalyticsService(
                     var duration = GetRoundedMinutes(openNap.OccurredAt, storedEvent.OccurredAt);
                     if (duration is > 0 and <= NapOutlierMinutes)
                     {
-                        GetMetrics(metricsByDate, dayGroup.Key).NapMinutes += duration;
+                        var metrics = GetMetrics(metricsByDate, dayGroup.Key);
+                        metrics.NapMinutes += duration;
+                        metrics.HasNapData = true;
                     }
 
                     openNap = null;
@@ -227,7 +231,9 @@ public sealed class PuppyAnalyticsService(
         public int Wees { get; set; }
         public int SleepMinutes { get; set; }
         public int NapMinutes { get; set; }
+        public bool HasSleepData { get; set; }
+        public bool HasNapData { get; set; }
 
-        public bool HasAnyMetric => Poops > 0 || Wees > 0 || SleepMinutes > 0 || NapMinutes > 0;
+        public bool HasAnyMetric => Poops > 0 || Wees > 0 || HasSleepData || HasNapData;
     }
 }

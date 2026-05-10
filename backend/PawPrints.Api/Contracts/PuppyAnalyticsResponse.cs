@@ -6,6 +6,6 @@ public sealed record PuppyAnalyticsDayResponse(
     string DateKey,
     int Poops,
     int Wees,
-    int SleepMinutes,
-    int NapMinutes
+    int? SleepMinutes,
+    int? NapMinutes
 );
