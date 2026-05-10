@@ -116,40 +116,27 @@ public sealed class PuppyAnalyticsService(
         SortedDictionary<DateOnly, MutableDayMetrics> metricsByDate
     )
     {
-        var eventsByDate = events
-            .GroupBy(storedEvent => storedEvent.DateKey)
-            .ToDictionary(group => group.Key, group => group.OrderBy(storedEvent => storedEvent.OccurredAt).ToArray());
-
-        foreach (var (dateKey, dayEvents) in eventsByDate)
+        PuppyEvent? openSleep = null;
+        foreach (var storedEvent in events.OrderBy(storedEvent => storedEvent.OccurredAt))
         {
-            var previousDate = dateKey.AddDays(-1);
-            if (!eventsByDate.TryGetValue(previousDate, out var previousDayEvents))
+            if (storedEvent.Type == "sleep")
+            {
+                openSleep ??= storedEvent;
+                continue;
+            }
+
+            if (openSleep is null || storedEvent.Type != "wake")
             {
                 continue;
             }
 
-            var previousSleep = previousDayEvents.LastOrDefault(storedEvent => storedEvent.Type == "sleep");
-            if (previousSleep is null)
-            {
-                continue;
-            }
-
-            var firstSleepOrNap = dayEvents.FirstOrDefault(storedEvent => storedEvent.Type is "sleep" or "nap");
-            var firstWake = dayEvents.FirstOrDefault(storedEvent =>
-                storedEvent.Type == "wake"
-                && storedEvent.OccurredAt > previousSleep.OccurredAt
-                && (firstSleepOrNap is null || storedEvent.OccurredAt < firstSleepOrNap.OccurredAt)
-            );
-            if (firstWake is null)
-            {
-                continue;
-            }
-
-            var duration = GetRoundedMinutes(previousSleep.OccurredAt, firstWake.OccurredAt);
+            var duration = GetRoundedMinutes(openSleep.OccurredAt, storedEvent.OccurredAt);
             if (duration > 0)
             {
-                GetMetrics(metricsByDate, dateKey).SleepMinutes += duration;
+                GetMetrics(metricsByDate, openSleep.DateKey).SleepMinutes += duration;
             }
+
+            openSleep = null;
         }
     }
 
