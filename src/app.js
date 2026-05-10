@@ -508,6 +508,30 @@ export function renderPuppyLog() {
     },
     onEventsInFlightChange: setEventsInFlight,
     onEventsSynced: markEventsSynced,
+    onRemoteSnapshot(snapshot) {
+      if (!snapshot?.settings) {
+        return;
+      }
+
+      applyRemoteSettings(settings, snapshot.settings);
+      if (arrivalDateInput) {
+        arrivalDateInput.value = settings.arrivalDate;
+      }
+      if (birthDateInput) {
+        birthDateInput.value = settings.birthDate;
+      }
+      cachedRemoteSnapshotEvents = snapshot.events ?? [];
+      if (settings.arrivalDate) {
+        const initialMin = clampDateKey(shiftDateKey(todayKey, -2), settings.arrivalDate, todayKey);
+        const initialMax = clampDateKey(shiftDateKey(todayKey, 2), settings.arrivalDate, todayKey);
+        materializeRemoteEventsWindow(initialMin, initialMax);
+      } else {
+        applyStoredEventsSnapshot(window.localStorage, cachedRemoteSnapshotEvents);
+        loadedEventWindowMinKey = "";
+        loadedEventWindowMaxKey = "";
+      }
+      renderState();
+    },
   });
 
   authUrlElements.forEach((element) => {
