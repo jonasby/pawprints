@@ -131,7 +131,7 @@ test("GivenALocalDate_WhenGettingTodayKey_ThenItUsesCalendarDateFormat", () => {
 test("GivenSupportedEventTypes_WhenRendered_ThenTheyCoverInitialPuppyEvents", () => {
   assert.deepEqual(
     EVENT_TYPES.map((eventType) => eventType.id),
-    ["pee", "poop", "eat", "nap", "sleep", "wake"],
+    ["pee", "poop", "eat", "nap", "sleep", "wake", "walkies", "training"],
   );
 });
 

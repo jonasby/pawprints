@@ -198,7 +198,7 @@ public sealed class PuppyAnalyticsService(
                     continue;
                 }
 
-                if (storedEvent.Type is "pee" or "poop" or "eat" or "sleep")
+                if (storedEvent.Type is "pee" or "poop" or "eat" or "sleep" or "walkies" or "training")
                 {
                     openNap = null;
                 }

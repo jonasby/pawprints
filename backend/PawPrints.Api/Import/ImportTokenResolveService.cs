@@ -68,7 +68,7 @@ public sealed class ImportTokenResolveService(
 
             Rules:
             - typeId is lowercase slug: letters, digits, hyphen only; max 40 chars.
-            - If the token matches a known type id or meaning (wee/pee, poo/poop, food/eat, sleep/nap, wake, etc.), use that canonical typeId and isNew=false.
+            - If the token matches a known type id or meaning (wee/pee, poo/poop, food/eat, sleep/nap, wake, walk/walkies, training, etc.), use that canonical typeId and isNew=false.
             - If it is a valid activity not in the list (e.g. chew, chill), set isNew=true, pick typeId, and give a short Title Case label and one emoji.
             - Use British "wee" = pee, "poo" = poop.
             - Include every token from the input list exactly once in matches[].token (same spelling as input).
