@@ -5,6 +5,7 @@ using Microsoft.AspNetCore.Authentication.Google;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.EntityFrameworkCore;
 using PawPrints.Api;
+using PawPrints.Api.Analytics;
 using PawPrints.Api.Data;
 using PawPrints.Api.Import;
 using PawPrints.Api.Invites;
@@ -40,6 +41,7 @@ try
     builder.Services.AddHttpContextAccessor();
     builder.Services.AddScoped<CurrentUser>();
     builder.Services.AddScoped<SnapshotSyncService>();
+    builder.Services.AddScoped<PuppyAnalyticsService>();
     builder.Services.AddScoped<InviteService>();
     builder.Services.AddHttpClient<ImportTokenResolveService>();
     builder.Services.AddCors(options =>
@@ -419,6 +421,20 @@ try
             }
 
             return Results.NoContent();
+        }
+    );
+
+    app.MapGet(
+        "/api/puppy-analytics",
+        [Authorize(Policy = AuthenticatedPawPrintsUserPolicy)]
+        async (
+            CurrentUser currentUser,
+            PuppyAnalyticsService analyticsService,
+            CancellationToken cancellationToken
+        ) =>
+        {
+            var analytics = await analyticsService.GetAnalyticsAsync(currentUser.Email, cancellationToken);
+            return Results.Ok(analytics);
         }
     );
 

@@ -146,6 +146,277 @@ function createLogDate(dateKey) {
   return new Date(year, month - 1, day);
 }
 
+function getPageFromHash() {
+  return window.location.hash === "#analytics" ? "analytics" : "log";
+}
+
+function formatDateLabel(dateKey) {
+  return dateFormatter.format(createLogDate(dateKey));
+}
+
+function formatDuration(minutes) {
+  if (!minutes) {
+    return "0m";
+  }
+
+  const hours = Math.floor(minutes / 60);
+  const remainingMinutes = minutes % 60;
+  if (hours === 0) {
+    return `${remainingMinutes}m`;
+  }
+
+  return remainingMinutes === 0 ? `${hours}h` : `${hours}h ${remainingMinutes}m`;
+}
+
+function formatAverageDuration(totalMinutes, dayCount) {
+  return formatDuration(dayCount > 0 ? Math.round(totalMinutes / dayCount) : 0);
+}
+
+function createSvgElement(tagName, attributes = {}) {
+  const element = document.createElementNS("http://www.w3.org/2000/svg", tagName);
+  Object.entries(attributes).forEach(([name, value]) => {
+    element.setAttribute(name, String(value));
+  });
+  return element;
+}
+
+function createSummaryCard(label, value, hint) {
+  const card = document.createElement("article");
+  card.className = "analytics-summary-card";
+  const labelElement = document.createElement("p");
+  labelElement.className = "analytics-summary-label";
+  labelElement.textContent = label;
+  const valueElement = document.createElement("p");
+  valueElement.className = "analytics-summary-value";
+  valueElement.textContent = value;
+  const hintElement = document.createElement("p");
+  hintElement.className = "analytics-summary-hint";
+  hintElement.textContent = hint;
+  card.append(labelElement, valueElement, hintElement);
+
+  return card;
+}
+
+function renderAnalyticsSummary(container, days) {
+  container.replaceChildren();
+  if (!days.length) {
+    return;
+  }
+
+  const totals = days.reduce(
+    (accumulator, day) => ({
+      poops: accumulator.poops + day.poops,
+      wees: accumulator.wees + day.wees,
+      sleepMinutes: accumulator.sleepMinutes + day.sleepMinutes,
+      napMinutes: accumulator.napMinutes + day.napMinutes,
+    }),
+    { poops: 0, wees: 0, sleepMinutes: 0, napMinutes: 0 },
+  );
+
+  container.append(
+    createSummaryCard("Poops", String(totals.poops), `${days.length} tracked day${days.length === 1 ? "" : "s"}`),
+    createSummaryCard("Wees", String(totals.wees), "Total wee events"),
+    createSummaryCard("Sleep", formatAverageDuration(totals.sleepMinutes, days.length), "Average per tracked day"),
+    createSummaryCard("Naps", formatAverageDuration(totals.napMinutes, days.length), "Average per tracked day"),
+  );
+}
+
+function renderAnalyticsChart(container, days) {
+  container.replaceChildren();
+  if (!days.length) {
+    return;
+  }
+
+  const chartWidth = Math.max(560, days.length * 72 + 112);
+  const chartHeight = 320;
+  const margin = { top: 34, right: 58, bottom: 68, left: 46 };
+  const plotWidth = chartWidth - margin.left - margin.right;
+  const plotHeight = chartHeight - margin.top - margin.bottom;
+  const maxCount = Math.max(1, ...days.flatMap((day) => [day.poops, day.wees]));
+  const rawMaxDuration = Math.max(60, ...days.flatMap((day) => [day.sleepMinutes, day.napMinutes]));
+  const maxDuration = Math.ceil(rawMaxDuration / 60) * 60;
+  const clampMetric = (value, maxValue) => Math.max(0, Math.min(maxValue, Number(value) || 0));
+  const xForIndex = (index) =>
+    days.length === 1
+      ? margin.left + plotWidth / 2
+      : margin.left + (plotWidth * index) / (days.length - 1);
+  const yForCount = (value) => margin.top + plotHeight - (clampMetric(value, maxCount) / maxCount) * plotHeight;
+  const yForDuration = (value) => margin.top + plotHeight - (clampMetric(value, maxDuration) / maxDuration) * plotHeight;
+  const series = [
+    { key: "poops", label: "Poops", color: "#c2410c", y: yForCount },
+    { key: "wees", label: "Wees", color: "#0ea5e9", y: yForCount },
+    { key: "sleepMinutes", label: "Sleep", color: "#7c3aed", y: yForDuration },
+    { key: "napMinutes", label: "Naps", color: "#16a34a", y: yForDuration },
+  ];
+  const svg = createSvgElement("svg", {
+    class: "analytics-chart",
+    viewBox: `0 0 ${chartWidth} ${chartHeight}`,
+    role: "img",
+    "aria-label": "Daily puppy analytics chart with count and duration axes",
+  });
+  const clipId = `analytics-plot-${Math.random().toString(36).slice(2)}`;
+  const defs = createSvgElement("defs");
+  const clipPath = createSvgElement("clipPath", { id: clipId });
+  clipPath.append(createSvgElement("rect", {
+    x: margin.left,
+    y: margin.top - 6,
+    width: plotWidth,
+    height: plotHeight + 6,
+  }));
+  defs.append(clipPath);
+  svg.append(defs);
+
+  for (let index = 0; index <= 4; index += 1) {
+    const y = margin.top + (plotHeight * index) / 4;
+    svg.append(createSvgElement("line", {
+      class: "analytics-grid-line",
+      x1: margin.left,
+      x2: chartWidth - margin.right,
+      y1: y,
+      y2: y,
+    }));
+  }
+
+  svg.append(
+    createSvgElement("line", {
+      class: "analytics-axis",
+      x1: margin.left,
+      x2: margin.left,
+      y1: margin.top,
+      y2: margin.top + plotHeight,
+    }),
+    createSvgElement("line", {
+      class: "analytics-axis",
+      x1: chartWidth - margin.right,
+      x2: chartWidth - margin.right,
+      y1: margin.top,
+      y2: margin.top + plotHeight,
+    }),
+    createSvgElement("line", {
+      class: "analytics-axis",
+      x1: margin.left,
+      x2: chartWidth - margin.right,
+      y1: margin.top + plotHeight,
+      y2: margin.top + plotHeight,
+    }),
+  );
+
+  const leftAxis = createSvgElement("text", { class: "analytics-axis-label", x: 4, y: 18 });
+  leftAxis.textContent = "# events";
+  const rightAxis = createSvgElement("text", {
+    class: "analytics-axis-label analytics-axis-label-duration",
+    x: chartWidth - margin.right + 4,
+    y: 18,
+  });
+  rightAxis.textContent = "hours";
+  svg.append(leftAxis, rightAxis);
+
+  for (let index = 0; index <= 4; index += 1) {
+    const countValue = Math.round(maxCount - (maxCount * index) / 4);
+    const durationValue = (maxDuration - (maxDuration * index) / 4) / 60;
+    const y = margin.top + (plotHeight * index) / 4;
+    const countLabel = createSvgElement("text", { class: "analytics-tick", x: margin.left - 10, y: y + 4, "text-anchor": "end" });
+    countLabel.textContent = String(countValue);
+    const durationLabel = createSvgElement("text", { class: "analytics-tick", x: chartWidth - margin.right + 10, y: y + 4 });
+    durationLabel.textContent = Number.isInteger(durationValue)
+      ? String(durationValue)
+      : durationValue.toFixed(1);
+    svg.append(countLabel, durationLabel);
+  }
+
+  days.forEach((day, index) => {
+    const x = xForIndex(index);
+    const labelAttributes = days.length <= 7
+      ? {
+        x,
+        y: chartHeight - 34,
+        "text-anchor": "middle",
+      }
+      : {
+        x,
+        y: chartHeight - 24,
+        "text-anchor": "end",
+        transform: `rotate(-38 ${x} ${chartHeight - 24})`,
+      };
+    const label = createSvgElement("text", {
+      class: "analytics-date-label",
+      ...labelAttributes,
+    });
+    label.textContent = formatDateLabel(day.dateKey);
+    svg.append(label);
+  });
+
+  series.forEach((item) => {
+    const points = days.map((day, index) => `${xForIndex(index)},${item.y(day[item.key])}`).join(" ");
+    svg.append(createSvgElement("polyline", {
+      class: "analytics-series-line",
+      points,
+      stroke: item.color,
+      "clip-path": `url(#${clipId})`,
+    }));
+
+    days.forEach((day, index) => {
+      svg.append(createSvgElement("circle", {
+        class: "analytics-series-point",
+        cx: xForIndex(index),
+        cy: item.y(day[item.key]),
+        r: 4,
+        fill: item.color,
+        "clip-path": `url(#${clipId})`,
+      }));
+    });
+  });
+
+  const legend = document.createElement("div");
+  legend.className = "analytics-legend";
+  series.forEach((item) => {
+    const legendItem = document.createElement("span");
+    legendItem.className = "analytics-legend-item";
+    legendItem.innerHTML = `<span style="background:${item.color}"></span>${item.label}`;
+    legend.appendChild(legendItem);
+  });
+
+  container.append(svg, legend);
+}
+
+function renderAnalyticsTable(container, days) {
+  container.replaceChildren();
+  if (!days.length) {
+    return;
+  }
+
+  const table = document.createElement("table");
+  table.className = "analytics-table";
+  const thead = document.createElement("thead");
+  const headerRow = document.createElement("tr");
+  ["Day", "Poops", "Wees", "Sleep", "Naps"].forEach((label) => {
+    const cell = document.createElement("th");
+    cell.textContent = label;
+    headerRow.appendChild(cell);
+  });
+  thead.appendChild(headerRow);
+  table.appendChild(thead);
+
+  const tbody = document.createElement("tbody");
+  days.forEach((day) => {
+    const row = document.createElement("tr");
+    [
+      formatDateLabel(day.dateKey),
+      day.poops,
+      day.wees,
+      formatDuration(day.sleepMinutes),
+      formatDuration(day.napMinutes),
+    ].forEach((value) => {
+      const cell = document.createElement("td");
+      cell.textContent = String(value);
+      row.appendChild(cell);
+    });
+    tbody.appendChild(row);
+  });
+  table.appendChild(tbody);
+  container.appendChild(table);
+}
+
 function hasRequiredSettings(settings) {
   return Boolean(settings.arrivalDate && settings.birthDate);
 }
@@ -456,6 +727,7 @@ export function renderPuppyLog() {
   const addStatus = document.querySelector("[data-add-status]");
   const syncStatus = document.querySelector("[data-login-status]");
   const appSections = document.querySelectorAll("[data-app-section]");
+  const pageSections = document.querySelectorAll("[data-page-section]");
   const loginPanel = document.querySelector("[data-login-panel]");
   const bootPanel = document.querySelector("[data-boot-panel]");
   const bootStatus = document.querySelector("[data-boot-status]");
@@ -465,6 +737,9 @@ export function renderPuppyLog() {
   const bootLoginLink = document.querySelector("[data-boot-login]");
   const authUrlElements = document.querySelectorAll("[data-auth-url]");
   const logoutForm = document.querySelector("[data-auth-url='/api/auth/logout']");
+  const menuToggle = document.querySelector("[data-menu-toggle]");
+  const menuPanel = document.querySelector("[data-menu-panel]");
+  const menuLinks = document.querySelectorAll("[data-menu-link]");
   const shareCollaboratorNote = document.querySelector("[data-share-collaborator]");
   const shareOwnerTools = document.querySelector("[data-share-owner]");
   const createInviteButton = document.querySelector("[data-create-invite]");
@@ -482,13 +757,24 @@ export function renderPuppyLog() {
   const importPreviewOut = document.querySelector("[data-import-preview-out]");
   const importStatus = document.querySelector("[data-import-status]");
   const undoButton = document.querySelector("[data-undo]");
+  const analyticsStatus = document.querySelector("[data-analytics-status]");
+  const analyticsSummary = document.querySelector("[data-analytics-summary]");
+  const analyticsChart = document.querySelector("[data-analytics-chart]");
+  const analyticsTable = document.querySelector("[data-analytics-table]");
+  const analyticsRefreshButton = document.querySelector("[data-analytics-refresh]");
   const settings = loadSettings();
   const todayKey = getTodayKey();
+  let currentPage = getPageFromHash();
   let isSignedIn = false;
   let isBootstrapping = false;
   let isCheckingSession = false;
   let bootstrapError = null;
   let accountProfile = null;
+  let analyticsState = {
+    isLoading: false,
+    data: null,
+    error: null,
+  };
   if (syncStatus) {
     syncStatus.classList.add("sync-status");
   }
@@ -562,6 +848,73 @@ export function renderPuppyLog() {
     onEventsInFlightChange: setEventsInFlight,
     onEventsSynced: markEventsSynced,
   });
+
+  function setMenuOpen(isOpen) {
+    if (!menuToggle || !menuPanel) {
+      return;
+    }
+
+    menuToggle.setAttribute("aria-expanded", isOpen ? "true" : "false");
+    menuPanel.hidden = !isOpen;
+  }
+
+  function renderAnalyticsState() {
+    if (!analyticsStatus || !analyticsSummary || !analyticsChart || !analyticsTable) {
+      return;
+    }
+
+    const days = analyticsState.data?.days ?? [];
+    analyticsSummary.replaceChildren();
+    analyticsChart.replaceChildren();
+    analyticsTable.replaceChildren();
+
+    if (analyticsState.isLoading) {
+      analyticsStatus.textContent = "Loading puppy analytics...";
+      return;
+    }
+
+    if (analyticsState.error) {
+      analyticsStatus.textContent = analyticsState.error?.message ?? "Could not load puppy analytics.";
+      return;
+    }
+
+    if (!days.length) {
+      analyticsStatus.textContent = "No analytics yet. Add and sync puppy events to see trends.";
+      return;
+    }
+
+    analyticsStatus.textContent = `${days.length} tracked day${days.length === 1 ? "" : "s"} with activity.`;
+    renderAnalyticsSummary(analyticsSummary, days);
+    renderAnalyticsChart(analyticsChart, days);
+    renderAnalyticsTable(analyticsTable, days);
+  }
+
+  async function loadAnalytics(options = {}) {
+    if (analyticsState.isLoading) {
+      return;
+    }
+
+    if (analyticsState.data && options.force !== true) {
+      return;
+    }
+
+    analyticsState = {
+      isLoading: true,
+      data: options.force === true ? null : analyticsState.data,
+      error: null,
+    };
+    renderState();
+
+    try {
+      const data = await remoteSync.loadPuppyAnalytics();
+      analyticsState = { isLoading: false, data, error: null };
+    } catch (error) {
+      console.error(error);
+      analyticsState = { isLoading: false, data: null, error };
+    }
+
+    renderState();
+  }
 
   authUrlElements.forEach((element) => {
     const path = element.dataset.authUrl;
@@ -678,6 +1031,9 @@ export function renderPuppyLog() {
       section.toggleAttribute("hidden", !isSignedIn || showBootPanel);
     });
     if (!isSignedIn || showBootPanel) {
+      pageSections.forEach((section) => {
+        section.hidden = true;
+      });
       return;
     }
 
@@ -730,14 +1086,58 @@ export function renderPuppyLog() {
       settings,
       syncAnimationState,
     });
+
+    pageSections.forEach((section) => {
+      section.toggleAttribute("hidden", section.dataset.pageSection !== currentPage);
+    });
+
+    if (currentPage === "analytics") {
+      renderAnalyticsState();
+      if (!analyticsState.data && !analyticsState.error && !analyticsState.isLoading) {
+        void loadAnalytics();
+      }
+    }
   };
 
-  logoutForm.addEventListener("submit", (event) => {
+  menuToggle?.addEventListener("click", () => {
+    setMenuOpen(menuToggle.getAttribute("aria-expanded") !== "true");
+  });
+
+  menuLinks.forEach((link) => {
+    link.addEventListener("click", () => {
+      setMenuOpen(false);
+    });
+  });
+
+  document.addEventListener("click", (event) => {
+    if (!menuPanel || !menuToggle || menuPanel.hidden) {
+      return;
+    }
+
+    const target = event.target;
+    if (target instanceof Node && (menuPanel.contains(target) || menuToggle.contains(target))) {
+      return;
+    }
+
+    setMenuOpen(false);
+  });
+
+  window.addEventListener("hashchange", () => {
+    currentPage = getPageFromHash();
+    renderState();
+  });
+
+  analyticsRefreshButton?.addEventListener("click", () => {
+    void loadAnalytics({ force: true });
+  });
+
+  logoutForm?.addEventListener("submit", (event) => {
     event.preventDefault();
     remoteSync.signOut().then(() => {
       isSignedIn = false;
       accountProfile = null;
       bootstrapError = null;
+      analyticsState = { isLoading: false, data: null, error: null };
       cachedRemoteSnapshotEvents = [];
       loadedEventWindowMinKey = "";
       loadedEventWindowMaxKey = "";
@@ -750,6 +1150,7 @@ export function renderPuppyLog() {
       if (shareInviteBlock) shareInviteBlock.hidden = true;
       if (shareStatus) shareStatus.textContent = "";
       if (inviteUrlInput) inviteUrlInput.value = "";
+      setMenuOpen(false);
       renderState();
     });
   });

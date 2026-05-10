@@ -208,6 +208,15 @@ export function createRemoteSync(
         throw error;
       }
     },
+    async loadPuppyAnalytics() {
+      const path = "/api/puppy-analytics";
+      const response = await fetch(createApiUrl(path), { credentials: "include" });
+      if (!response.ok) {
+        throw await createApiError(response, path);
+      }
+
+      return response.json();
+    },
     async signOut() {
       await fetch(createApiUrl("/api/auth/logout"), {
         method: "POST",

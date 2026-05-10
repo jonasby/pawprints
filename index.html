@@ -17,10 +17,29 @@
             <h1 id="app-title">PawPrints</h1>
           </div>
         </div>
-        <div class="auth-bar" data-app-section hidden>
-          <form action="/api/auth/logout" method="post" data-auth-url="/api/auth/logout">
-            <button type="submit" class="primary-link">Sign out</button>
-          </form>
+        <div class="auth-bar app-menu" data-app-section hidden>
+          <button
+            class="menu-toggle"
+            type="button"
+            aria-expanded="false"
+            aria-controls="app-menu-panel"
+            data-menu-toggle
+          >
+            <span class="visually-hidden">Open menu</span>
+            <span aria-hidden="true"></span>
+            <span aria-hidden="true"></span>
+            <span aria-hidden="true"></span>
+          </button>
+          <div class="menu-panel" id="app-menu-panel" data-menu-panel hidden>
+            <nav class="menu-group" aria-label="App pages">
+              <a class="menu-item" href="#analytics" data-menu-link>Puppy analytics</a>
+            </nav>
+            <div class="menu-group" aria-label="Account">
+              <form action="/api/auth/logout" method="post" data-auth-url="/api/auth/logout">
+                <button type="submit" class="menu-item menu-signout">Sign out</button>
+              </form>
+            </div>
+          </div>
         </div>
       </section>
 
@@ -45,7 +64,7 @@
         </button>
       </section>
 
-      <section class="card settings" aria-labelledby="settings-title" data-app-section hidden>
+      <section class="card settings" aria-labelledby="settings-title" data-app-section data-page-section="log" hidden>
         <div class="section-heading">
           <h2 id="settings-title">Day</h2>
           <div class="day-nav" aria-label="Log day navigation">
@@ -123,7 +142,7 @@
         </details>
       </section>
 
-      <section class="card recorder" aria-labelledby="record-event-title" data-app-section data-activity-section hidden>
+      <section class="card recorder" aria-labelledby="record-event-title" data-app-section data-page-section="log" data-activity-section hidden>
         <div class="section-heading">
           <h2 id="record-event-title">Add event</h2>
           <p class="add-status" data-add-status aria-live="polite"></p>
@@ -136,7 +155,7 @@
         ></div>
       </section>
 
-      <section class="card history" aria-labelledby="today-events-title" data-app-section data-activity-section hidden>
+      <section class="card history" aria-labelledby="today-events-title" data-app-section data-page-section="log" data-activity-section hidden>
         <div class="section-heading">
           <h2 id="today-events-title">Log</h2>
           <button class="undo-button" type="button" data-undo disabled aria-label="Undo last log change">
@@ -147,6 +166,23 @@
         <p id="empty-state" class="empty-state" data-empty-state>
           No events yet for this day.
         </p>
+      </section>
+
+      <section class="card analytics-page" aria-labelledby="analytics-title" data-app-section data-page-section="analytics" hidden>
+        <div class="section-heading analytics-heading">
+          <div>
+            <p class="eyebrow">Daily trends</p>
+            <h2 id="analytics-title">Puppy analytics</h2>
+          </div>
+          <div class="analytics-actions">
+            <a class="muted-button" href="#log" data-menu-link>Log</a>
+            <button class="muted-button" type="button" data-analytics-refresh>Refresh</button>
+          </div>
+        </div>
+        <p class="analytics-status" data-analytics-status aria-live="polite"></p>
+        <div class="analytics-summary-grid" data-analytics-summary></div>
+        <div class="analytics-chart-shell" data-analytics-chart></div>
+        <div class="analytics-table-shell" data-analytics-table></div>
       </section>
     </main>
 

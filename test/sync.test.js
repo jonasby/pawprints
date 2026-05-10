@@ -73,3 +73,36 @@ test("GivenPendingEvents_WhenSyncRuns_ThenEventIdsAreMarkedInFlightAndSynced", a
   ]);
   assert.deepEqual(committedChanges, [{ upsertIds: ["event-1"], deletedEventIds: [] }]);
 });
+
+test("GivenAnalyticsRequest_WhenLoadingPuppyAnalytics_ThenEndpointIsFetched", async () => {
+  const previousFetch = globalThis.fetch;
+  const requestedUrls = [];
+
+  try {
+    globalThis.fetch = async (url, options) => {
+      requestedUrls.push({ url, options });
+      return {
+        ok: true,
+        status: 200,
+        async json() {
+          return { days: [{ dateKey: "2026-04-26", poops: 1, wees: 2, sleepMinutes: 540, napMinutes: 70 }] };
+        },
+      };
+    };
+
+    const remoteSync = createRemoteSync({}, {});
+    const analytics = await remoteSync.loadPuppyAnalytics();
+
+    assert.deepEqual(analytics.days, [
+      { dateKey: "2026-04-26", poops: 1, wees: 2, sleepMinutes: 540, napMinutes: 70 },
+    ]);
+    assert.deepEqual(requestedUrls, [
+      {
+        url: "/api/puppy-analytics",
+        options: { credentials: "include" },
+      },
+    ]);
+  } finally {
+    globalThis.fetch = previousFetch;
+  }
+});
