@@ -201,7 +201,16 @@ function createSvgElement(tagName, attributes = {}) {
   return element;
 }
 
-function createSummaryCard(label, value, hint) {
+function formatPerDayAverage(total, dayCount) {
+  if (dayCount <= 0) {
+    return "0";
+  }
+
+  const average = total / dayCount;
+  return average >= 10 || Number.isInteger(average) ? String(Math.round(average)) : average.toFixed(1);
+}
+
+function createSummaryCard(label, value, hint, meta = null) {
   const card = document.createElement("article");
   card.className = "analytics-summary-card";
   const labelElement = document.createElement("p");
@@ -209,7 +218,19 @@ function createSummaryCard(label, value, hint) {
   labelElement.textContent = label;
   const valueElement = document.createElement("p");
   valueElement.className = "analytics-summary-value";
-  valueElement.textContent = value;
+  const primaryValue = document.createElement("span");
+  primaryValue.textContent = value;
+  valueElement.appendChild(primaryValue);
+  if (meta) {
+    const metaElement = document.createElement("span");
+    metaElement.className = "analytics-summary-meta";
+    if (typeof meta === "object") {
+      metaElement.textContent = `${meta.label}: ${meta.value}`;
+    } else {
+      metaElement.textContent = meta;
+    }
+    valueElement.appendChild(metaElement);
+  }
   const hintElement = document.createElement("p");
   hintElement.className = "analytics-summary-hint";
   hintElement.textContent = hint;
@@ -234,15 +255,15 @@ function renderAnalyticsSummary(container, days) {
   const sleepAverage = getDurationAverage(days, "sleepMinutes");
   const napAverage = getDurationAverage(days, "napMinutes");
   const sleepHint = sleepAverage
-    ? `Valid ${pluralize(sleepAverage.count, "night")}: ${sleepAverage.count}`
+    ? `Nights: ${sleepAverage.count}`
     : "No valid sleep nights";
   const napHint = napAverage
-    ? `Valid nap ${pluralize(napAverage.count, "day")}: ${napAverage.count}`
+    ? `Nap days: ${napAverage.count}`
     : "No valid nap days";
 
   container.append(
-    createSummaryCard("Poops", String(totals.poops), `Tracked days: ${days.length}`),
-    createSummaryCard("Wees", String(totals.wees), "Total wee events"),
+    createSummaryCard("Poops/day", formatPerDayAverage(totals.poops, days.length), "Daily average", { label: "Total", value: totals.poops }),
+    createSummaryCard("Wees/day", formatPerDayAverage(totals.wees, days.length), "Daily average", { label: "Total", value: totals.wees }),
     createSummaryCard("Sleep", formatDuration(sleepAverage?.averageMinutes), sleepHint),
     createSummaryCard("Naps", formatDuration(napAverage?.averageMinutes), napHint),
   );

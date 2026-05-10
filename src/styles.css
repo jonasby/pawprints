@@ -883,11 +883,31 @@ button.primary-link {
 }
 
 .analytics-summary-value {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: baseline;
   margin: 3px 0;
   color: #2f241d;
   font-size: clamp(1.35rem, 7vw, 2.4rem);
   font-weight: 900;
   line-height: 1;
+}
+
+.analytics-summary-meta {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid #fed7aa;
+  border-radius: 999px;
+  padding: 2px 7px;
+  color: #7c5a45;
+  background: #fff;
+  font-size: clamp(0.72rem, 3vw, 0.86rem);
+  font-weight: 850;
+  white-space: nowrap;
+  box-shadow: 0 1px 3px rgb(47 36 29 / 0.06);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
 }
 
 .analytics-summary-hint {
