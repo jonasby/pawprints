@@ -663,8 +663,19 @@ button.primary-link {
   min-width: 0;
 }
 
-.event-chip {
+.event-chip-slot {
   position: relative;
+  display: inline-flex;
+  align-items: baseline;
+  max-width: 100%;
+}
+
+.event-chip-slot.is-syncing,
+.event-chip-slot.is-synced {
+  padding-right: 14px;
+}
+
+.event-chip {
   display: inline-flex;
   gap: 3px;
   align-items: baseline;
@@ -674,11 +685,6 @@ button.primary-link {
   background: transparent;
   cursor: pointer;
   line-height: 1.05;
-}
-
-.event-chip.is-syncing,
-.event-chip.is-synced {
-  padding-right: 14px;
 }
 
 .event-sync-indicator {

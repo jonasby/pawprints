@@ -177,19 +177,70 @@ function getEventSyncState(event, syncAnimationState) {
 }
 
 function getEventSyncIndicatorMarkup(syncState) {
-  if (!syncState) {
-    return "";
-  }
-
-  const label = syncState === "syncing" ? "Syncing" : "Synced";
-  const tick = syncState === "synced" ? "&#10003;" : "";
+  const label = syncState === "syncing" ? "Syncing" : syncState === "synced" ? "Synced" : "";
+  const tick = syncState === "synced" ? "\u2713" : "";
+  const indicatorClass = syncState ? `event-sync-indicator event-sync-indicator-${syncState}` : "event-sync-indicator";
 
   return `
-    <span class="event-sync-indicator event-sync-indicator-${syncState}" aria-hidden="true">
-      ${tick}
-    </span>
-    <span class="visually-hidden">${label}</span>
+    <span
+      class="${indicatorClass}"
+      aria-hidden="true"
+      ${syncState ? "" : "hidden"}
+    >${tick}</span>
+    <span class="visually-hidden" data-sync-announcer>${label}</span>
   `;
+}
+
+/**
+ * Updates only sync badges on existing rows so time inputs and focus are preserved.
+ * Full list rebuilds still come from renderEvents when log data changes.
+ */
+function applySyncIndicatorsToEventList(eventList, syncAnimationState) {
+  if (!eventList) {
+    return;
+  }
+
+  eventList.querySelectorAll(".event-chip-slot").forEach((slot) => {
+    const button = slot.querySelector("[data-remove-event]");
+    if (!button) {
+      return;
+    }
+
+    const eventId = button.dataset.removeEvent;
+    const syncState = getEventSyncState({ id: eventId }, syncAnimationState);
+
+    slot.classList.toggle("is-syncing", syncState === "syncing");
+    slot.classList.toggle("is-synced", syncState === "synced");
+
+    let indicator = slot.querySelector(".event-sync-indicator");
+    let announcer = slot.querySelector("[data-sync-announcer]");
+
+    if (!indicator) {
+      indicator = document.createElement("span");
+      indicator.className = "event-sync-indicator";
+      indicator.setAttribute("aria-hidden", "true");
+      button.after(indicator);
+    }
+
+    if (!announcer) {
+      announcer = document.createElement("span");
+      announcer.className = "visually-hidden";
+      announcer.dataset.syncAnnouncer = "";
+      indicator.after(announcer);
+    }
+
+    indicator.className = "event-sync-indicator";
+    if (syncState) {
+      indicator.removeAttribute("hidden");
+      indicator.classList.add(`event-sync-indicator-${syncState}`);
+      indicator.textContent = syncState === "synced" ? "\u2713" : "";
+      announcer.textContent = syncState === "syncing" ? "Syncing" : "Synced";
+    } else {
+      indicator.setAttribute("hidden", "");
+      indicator.textContent = "";
+      announcer.textContent = "";
+    }
+  });
 }
 
 function renderEvents({
@@ -248,19 +299,21 @@ function renderEvents({
           .map(
             ({ event, eventType }) => {
               const syncState = getEventSyncState(event, syncAnimationState);
-              const syncClass = syncState ? ` is-${syncState}` : "";
+              const slotClass = syncState ? ` is-${syncState}` : "";
 
               return `
-              <button
-                class="event-chip${syncClass}"
-                type="button"
-                data-remove-event="${event.id}"
-                aria-label="Remove ${eventType.label} event"
-              >
-                <span class="event-chip-emoji" aria-hidden="true">${eventType.emoji}</span>
-                <span class="event-chip-label">${eventType.label}</span>
+              <span class="event-chip-slot${slotClass}">
+                <button
+                  class="event-chip"
+                  type="button"
+                  data-remove-event="${event.id}"
+                  aria-label="Remove ${eventType.label} event"
+                >
+                  <span class="event-chip-emoji" aria-hidden="true">${eventType.emoji}</span>
+                  <span class="event-chip-label">${eventType.label}</span>
+                </button>
                 ${getEventSyncIndicatorMarkup(syncState)}
-              </button>
+              </span>
             `;
             },
           )
@@ -468,7 +521,7 @@ export function renderPuppyLog() {
         syncAnimationState.inFlightEventIds.delete(eventId);
       }
     });
-    renderState();
+    applySyncIndicatorsToEventList(eventList, syncAnimationState);
   }
 
   function markEventsSynced(eventIds) {
@@ -485,11 +538,11 @@ export function renderPuppyLog() {
         window.setTimeout(() => {
           syncAnimationState.recentlySyncedEventIds.delete(eventId);
           syncAnimationState.clearSyncedTimers.delete(eventId);
-          renderState();
+          applySyncIndicatorsToEventList(eventList, syncAnimationState);
         }, SYNCED_TICK_VISIBLE_MS),
       );
     });
-    renderState();
+    applySyncIndicatorsToEventList(eventList, syncAnimationState);
   }
 
   const remoteSync = createRemoteSync(window.localStorage, {
