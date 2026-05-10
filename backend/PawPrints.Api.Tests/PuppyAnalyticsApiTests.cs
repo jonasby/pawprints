@@ -99,6 +99,37 @@ public sealed class PuppyAnalyticsApiTests
     }
 
     [Fact]
+    public async Task GivenOvernightSleepWithLoggedWakePause_WhenFetchingPuppyAnalytics_ThenAwakePauseIsExcludedFromNightSleep()
+    {
+        await using var application = new PawPrintsApiApplication();
+        using var client = application.CreateAuthenticatedClient("owner@gmail.com");
+
+        await client.PutAsJsonAsync("/api/sync", PuppyAnalyticsTestData.CreateSnapshot(
+            new SyncEventRequest("sleep-may6", "sleep", DateTimeOffset.Parse("2026-05-06T22:30:00Z"), "2026-05-06"),
+            new SyncEventRequest("wake-for-wee-may7", "wake", DateTimeOffset.Parse("2026-05-07T03:00:00Z"), "2026-05-07"),
+            new SyncEventRequest("wee-may7-night", "pee", DateTimeOffset.Parse("2026-05-07T03:05:00Z"), "2026-05-07"),
+            new SyncEventRequest("back-to-sleep-may7", "sleep", DateTimeOffset.Parse("2026-05-07T03:10:00Z"), "2026-05-07"),
+            new SyncEventRequest("wake-may7", "wake", DateTimeOffset.Parse("2026-05-07T06:20:00Z"), "2026-05-07"),
+            new SyncEventRequest("wee-may7-day", "pee", DateTimeOffset.Parse("2026-05-07T06:25:00Z"), "2026-05-07")
+        ));
+
+        var analytics = await client.GetFromJsonAsync<PuppyAnalyticsResponse>("/api/puppy-analytics");
+
+        Assert.NotNull(analytics);
+        Assert.Equal(
+            ["2026-05-06", "2026-05-07"],
+            analytics.Days.Select(day => day.DateKey).ToArray()
+        );
+
+        var may6 = Assert.Single(analytics.Days, day => day.DateKey == "2026-05-06");
+        Assert.Equal(460, may6.SleepMinutes);
+
+        var may7 = Assert.Single(analytics.Days, day => day.DateKey == "2026-05-07");
+        Assert.Equal(2, may7.Wees);
+        Assert.Equal(0, may7.SleepMinutes);
+    }
+
+    [Fact]
     public async Task GivenCollaborator_WhenFetchingPuppyAnalytics_ThenOwnerMetricsAreReturned()
     {
         await using var application = new PawPrintsApiApplication();

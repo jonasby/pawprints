@@ -10,6 +10,7 @@ public sealed class PuppyAnalyticsService(
 )
 {
     private const int NapOutlierMinutes = 150;
+    private static readonly TimeOnly MorningSleepReturnCutoff = new(12, 0);
 
     public async Task<PuppyAnalyticsResponse> GetAnalyticsAsync(
         string email,
@@ -117,11 +118,25 @@ public sealed class PuppyAnalyticsService(
     )
     {
         PuppyEvent? openSleep = null;
+        DateOnly? activeNightDate = null;
         foreach (var storedEvent in events.OrderBy(storedEvent => storedEvent.OccurredAt))
         {
             if (storedEvent.Type == "sleep")
             {
-                openSleep ??= storedEvent;
+                if (openSleep is not null)
+                {
+                    continue;
+                }
+
+                if (
+                    activeNightDate is null
+                    || !IsMorningReturnToSleep(storedEvent, activeNightDate.Value)
+                )
+                {
+                    activeNightDate = storedEvent.DateKey;
+                }
+
+                openSleep = storedEvent;
                 continue;
             }
 
@@ -133,11 +148,17 @@ public sealed class PuppyAnalyticsService(
             var duration = GetRoundedMinutes(openSleep.OccurredAt, storedEvent.OccurredAt);
             if (duration > 0)
             {
-                GetMetrics(metricsByDate, openSleep.DateKey).SleepMinutes += duration;
+                GetMetrics(metricsByDate, activeNightDate ?? openSleep.DateKey).SleepMinutes += duration;
             }
 
             openSleep = null;
         }
+    }
+
+    private static bool IsMorningReturnToSleep(PuppyEvent sleepEvent, DateOnly activeNightDate)
+    {
+        return sleepEvent.DateKey == activeNightDate.AddDays(1)
+            && TimeOnly.FromTimeSpan(sleepEvent.OccurredAt.TimeOfDay) < MorningSleepReturnCutoff;
     }
 
     private static void AddNapDurations(
