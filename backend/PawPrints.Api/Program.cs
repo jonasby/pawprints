@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using Microsoft.Data.SqlClient;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authentication.Google;
@@ -246,7 +247,15 @@ try
                 "Applying migrations for provider {DatabaseProvider}",
                 db.Database.ProviderName ?? "unknown"
             );
-            await db.Database.MigrateAsync();
+            try
+            {
+                await db.Database.MigrateAsync();
+            }
+            catch (Exception ex)
+            {
+                Program.LogDatabaseMigrationFailure(startupLogger, ex);
+                throw;
+            }
         }
     }
 
@@ -461,7 +470,100 @@ finally
     Log.CloseAndFlush();
 }
 
-public partial class Program;
+public partial class Program
+{
+    /// <summary>
+    /// Logs EF migration failures with inner exceptions and, when present, SQL Server error numbers and batch errors
+    /// (avoids opaque “connection reset” style failures with no root cause in logs).
+    /// </summary>
+    public static void LogDatabaseMigrationFailure(Microsoft.Extensions.Logging.ILogger logger, Exception exception)
+    {
+        logger.LogError(
+            exception,
+            "Database migration failed with {ExceptionType}: {Message}",
+            exception.GetType().FullName ?? exception.GetType().Name,
+            exception.Message
+        );
+
+        if (exception is AggregateException aggregate)
+        {
+            foreach (var inner in aggregate.Flatten().InnerExceptions)
+            {
+                logger.LogError(
+                    inner,
+                    "Migration aggregate inner: {ExceptionType}: {Message}",
+                    inner.GetType().FullName ?? inner.GetType().Name,
+                    inner.Message
+                );
+                LogSqlClientErrorsIfPresent(logger, inner);
+            }
+
+            return;
+        }
+
+        for (var walk = exception.InnerException; walk != null; walk = walk.InnerException)
+        {
+            logger.LogError(
+                "Migration inner exception: {ExceptionType}: {Message}",
+                walk.GetType().FullName ?? walk.GetType().Name,
+                walk.Message
+            );
+        }
+
+        LogSqlClientErrorsIfPresent(logger, exception);
+    }
+
+    static void LogSqlClientErrorsIfPresent(Microsoft.Extensions.Logging.ILogger logger, Exception exception)
+    {
+        var sql = FindSqlException(exception);
+        if (sql is null)
+        {
+            return;
+        }
+
+        logger.LogError(
+            "SqlException: Number={SqlNumber}, State={SqlState}, Class={SqlClass}, LineNumber={SqlLineNumber}, Source={SqlSource}, Server={SqlServer}, Procedure={SqlProcedure}",
+            sql.Number,
+            sql.State,
+            sql.Class,
+            sql.LineNumber,
+            sql.Source,
+            sql.Server,
+            sql.Procedure ?? "(none)"
+        );
+
+        for (var i = 0; i < sql.Errors.Count; i++)
+        {
+            var err = sql.Errors[i];
+            logger.LogError(
+                "SqlError[{ErrorIndex}]: Number={Number}, State={State}, Class={Class}, Message={SqlMessage}",
+                i,
+                err.Number,
+                err.State,
+                err.Class,
+                err.Message
+            );
+        }
+    }
+
+    static SqlException? FindSqlException(Exception exception)
+    {
+        if (exception is SqlException sql)
+        {
+            return sql;
+        }
+
+        for (var walk = exception.InnerException; walk != null; walk = walk.InnerException)
+        {
+            if (walk is SqlException innerSql)
+            {
+                return innerSql;
+            }
+        }
+
+        return null;
+    }
+}
 
 public static partial class ProgramConfiguration
 {
