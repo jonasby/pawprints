@@ -52,7 +52,7 @@ namespace PawPrints.Api.Data.Migrations
                     b.HasIndex("TokenHash")
                         .IsUnique();
 
-                    b.ToTable("Invites");
+                    b.ToTable("Invites", (string)null);
                 });
 
             modelBuilder.Entity("PawPrints.Api.Data.PawPrintsUser", b =>
@@ -93,7 +93,7 @@ namespace PawPrints.Api.Data.Migrations
                     b.HasIndex("Email")
                         .IsUnique();
 
-                    b.ToTable("Users");
+                    b.ToTable("Users", (string)null);
                 });
 
             modelBuilder.Entity("PawPrints.Api.Data.PuppyEvent", b =>
@@ -130,7 +130,7 @@ namespace PawPrints.Api.Data.Migrations
                     b.HasIndex("UserId", "ClientEventId")
                         .IsUnique();
 
-                    b.ToTable("Events");
+                    b.ToTable("Events", (string)null);
                 });
 
             modelBuilder.Entity("PawPrints.Api.Data.PawPrintsInvite", b =>

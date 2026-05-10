@@ -70,8 +70,24 @@ try
             return;
         }
 
-        options.UseSqlServer(connectionString);
+        options.UseSqlServer(
+            connectionString,
+            sql =>
+            {
+                sql.EnableRetryOnFailure(
+                    maxRetryCount: 6,
+                    maxRetryDelay: TimeSpan.FromSeconds(30),
+                    errorNumbersToAdd: null
+                );
+            }
+        );
     });
+
+    builder.Services.AddSingleton<DatabaseMigrationGate>();
+    if (!builder.Environment.IsEnvironment("Testing"))
+    {
+        builder.Services.AddHostedService<DatabaseMigrationHostedService>();
+    }
 
     var googleClientId = ProgramConfiguration.GetFirstConfiguredValue(
         builder.Configuration,
@@ -205,6 +221,7 @@ try
     });
 
     var app = builder.Build();
+    var migrationGate = app.Services.GetRequiredService<DatabaseMigrationGate>();
 
     using (var scope = app.Services.CreateScope())
     {
@@ -231,14 +248,14 @@ try
                 }
             }
             await db.Database.EnsureCreatedAsync();
+            migrationGate.MarkReady();
         }
         else
         {
             startupLogger.LogInformation(
-                "Applying migrations for provider {DatabaseProvider}",
+                "Database migrations will run in the background for provider {DatabaseProvider}",
                 db.Database.ProviderName ?? "unknown"
             );
-            await db.Database.MigrateAsync();
         }
     }
 
@@ -248,7 +265,46 @@ try
         app.UseSwaggerUI();
     }
 
+    if (!app.Environment.IsEnvironment("Testing"))
+    {
+        app.Use(async (context, next) =>
+        {
+            var normalized =
+                context.Request.Path.Value?.TrimEnd('/') ?? string.Empty;
+            if (normalized.Equals("/api/health", StringComparison.OrdinalIgnoreCase)
+                || normalized.Equals("/health", StringComparison.OrdinalIgnoreCase))
+            {
+                context.Response.StatusCode = StatusCodes.Status200OK;
+                return;
+            }
+
+            await next();
+        });
+    }
+
     app.UseMiddleware<UnhandledExceptionLoggingMiddleware>();
+
+    if (!app.Environment.IsEnvironment("Testing"))
+    {
+        app.Use(async (context, next) =>
+        {
+            if (context.Request.Path.StartsWithSegments("/api"))
+            {
+                var gate = context.RequestServices.GetRequiredService<DatabaseMigrationGate>();
+                try
+                {
+                    await gate.WaitForApiAsync(TimeSpan.FromMinutes(15), context.RequestAborted);
+                }
+                catch (Exception)
+                {
+                    context.Response.StatusCode = StatusCodes.Status503ServiceUnavailable;
+                    return;
+                }
+            }
+
+            await next();
+        });
+    }
 
     app.UseHttpsRedirection();
     app.UseCors("Frontend");

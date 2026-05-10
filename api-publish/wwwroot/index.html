@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>PawPrints</title>
+    <link rel="icon" href="/assets/pawprints-icon-BSldz3Fm.svg" type="image/svg+xml" />
+    <script type="module" crossorigin src="/assets/index-D_cckbZN.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/index-BukOx6hs.css">
+  </head>
+  <body>
+    <main class="app-shell">
+      <section class="hero" aria-labelledby="app-title">
+        <div class="brand">
+          <img class="brand-mark" src="data:image/svg+xml,%3csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%20160%20160'%20role='img'%20aria-labelledby='title'%3e%3ctitle%20id='title'%3ePawPrints%20logo%3c/title%3e%3crect%20width='160'%20height='160'%20rx='40'%20fill='%23fff7ed'%20/%3e%3cpath%20d='M44%2096c13-23%2059-23%2072%200%208%2014-4%2027-20%2022-9-3-23-3-32%200-16%205-28-8-20-22Z'%20fill='%23d97706'%20/%3e%3ccircle%20cx='45'%20cy='56'%20r='15'%20fill='%23f59e0b'%20/%3e%3ccircle%20cx='72'%20cy='42'%20r='15'%20fill='%23f59e0b'%20/%3e%3ccircle%20cx='104'%20cy='42'%20r='15'%20fill='%23f59e0b'%20/%3e%3ccircle%20cx='129'%20cy='58'%20r='15'%20fill='%23f59e0b'%20/%3e%3cpath%20d='M36%20130c32%2012%2063%207%2088-15'%20fill='none'%20stroke='%237c2d12'%20stroke-linecap='round'%20stroke-width='10'%20/%3e%3c/svg%3e" alt="" />
+          <div>
+            <p class="eyebrow">Puppy tracker</p>
+            <h1 id="app-title">PawPrints</h1>
+          </div>
+        </div>
+        <div class="auth-bar" data-app-section hidden>
+          <form action="/api/auth/logout" method="post" data-auth-url="/api/auth/logout">
+            <button type="submit" class="primary-link">Sign out</button>
+          </form>
+        </div>
+      </section>
+
+      <section class="card login-facade" data-login-panel aria-labelledby="login-title">
+        <h2 id="login-title">Sign in to PawPrints</h2>
+        <a class="primary-link" href="/api/auth/login" data-auth-url="/api/auth/login">
+          Sign in with Google
+        </a>
+        <p class="sync-status" data-login-status aria-live="polite"></p>
+      </section>
+
+      <section class="card boot-panel" data-boot-panel hidden aria-labelledby="boot-title">
+        <h2 id="boot-title">Preparing your log</h2>
+        <p class="boot-status" data-boot-status aria-live="polite"></p>
+        <p class="boot-help" data-boot-help hidden></p>
+        <pre class="boot-error-details" data-boot-error-details hidden></pre>
+        <a class="primary-link" href="/api/auth/login" data-auth-url="/api/auth/login" data-boot-login hidden>
+          Sign in again
+        </a>
+        <button class="retry-button" type="button" data-boot-retry hidden>
+          Retry loading snapshot
+        </button>
+      </section>
+
+      <section class="card settings" aria-labelledby="settings-title" data-app-section hidden>
+        <div class="section-heading">
+          <h2 id="settings-title">Day</h2>
+          <div class="day-nav" aria-label="Log day navigation">
+            <button class="day-nav-button" type="button" data-previous-day aria-label="Previous day">
+              Prev
+            </button>
+            <p class="log-summary" data-log-summary></p>
+            <button class="day-nav-button" type="button" data-next-day aria-label="Next day">
+              Next
+            </button>
+          </div>
+        </div>
+        <details class="setup-panel" data-setup-panel>
+          <summary>
+            <span>Setup</span>
+            <span class="setup-status" data-setup-status></span>
+          </summary>
+          <div class="settings-grid">
+            <label class="field">
+              <span>Log date</span>
+              <input type="date" data-log-date />
+            </label>
+            <label class="field">
+              <span>Arrival date</span>
+              <input type="date" data-arrival-date required />
+            </label>
+            <label class="field">
+              <span>Birth date</span>
+              <input type="date" data-birth-date required />
+            </label>
+          </div>
+          <div class="share-panel" data-share-panel>
+            <p class="share-collaborator-note" data-share-collaborator hidden></p>
+            <div class="share-owner-tools" data-share-owner hidden>
+              <p class="share-heading">Share log</p>
+              <p class="share-hint">
+                Create a link for a partner or sitter. They sign in with Google and see this same puppy log.
+              </p>
+              <button class="muted-button" type="button" data-create-invite>Create invite link</button>
+              <div class="share-invite-block" data-share-invite-block hidden>
+                <label class="field">
+                  <span>Invite link</span>
+                  <input type="text" readonly data-invite-url />
+                </label>
+                <div class="share-actions">
+                  <button class="muted-button" type="button" data-copy-invite>Copy link</button>
+                  <a class="primary-link share-whatsapp" data-whatsapp-invite href="#" target="_blank" rel="noopener noreferrer">WhatsApp</a>
+                </div>
+                <p class="invite-expiry" data-invite-expiry></p>
+              </div>
+              <p class="share-status" data-share-status aria-live="polite"></p>
+            </div>
+          </div>
+          <div class="import-panel" data-import-section hidden>
+            <p class="import-heading">Import from notes</p>
+            <p class="import-hint">
+              One line per time (24h clock), e.g.
+              <code>0700 wake + wee + poo</code>. Emojis are ignored for matching. Synonyms like wee/pee are
+              recognised; unknown phrases become custom event types (stored in this browser).
+            </p>
+            <label class="field import-field">
+              <span>Paste log</span>
+              <textarea class="import-textarea" rows="8" data-import-text placeholder="2230 sleep&#10;0500 wee + poo"></textarea>
+            </label>
+            <div class="import-actions">
+              <button class="muted-button" type="button" data-import-preview>Preview</button>
+              <button class="muted-button" type="button" data-import-ai hidden>Refine with AI</button>
+              <button class="primary-link import-apply" type="button" data-import-apply disabled>
+                Import to this day
+              </button>
+            </div>
+            <p class="import-status" data-import-status aria-live="polite"></p>
+            <div class="import-preview-out" data-import-preview-out hidden></div>
+          </div>
+        </details>
+      </section>
+
+      <section class="card recorder" aria-labelledby="record-event-title" data-app-section data-activity-section hidden>
+        <div class="section-heading">
+          <h2 id="record-event-title">Add event</h2>
+          <p class="add-status" data-add-status aria-live="polite"></p>
+        </div>
+        <div
+          id="event-buttons"
+          class="event-buttons"
+          data-event-buttons
+          aria-label="Puppy event buttons"
+        ></div>
+      </section>
+
+      <section class="card history" aria-labelledby="today-events-title" data-app-section data-activity-section hidden>
+        <div class="section-heading">
+          <h2 id="today-events-title">Log</h2>
+          <button class="undo-button" type="button" data-undo disabled aria-label="Undo last log change">
+            Undo
+          </button>
+        </div>
+        <ol id="event-list" class="event-list" data-event-list></ol>
+        <p id="empty-state" class="empty-state" data-empty-state>
+          No events yet for this day.
+        </p>
+      </section>
+    </main>
+
+  </body>
+</html>
