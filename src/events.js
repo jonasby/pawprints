@@ -5,6 +5,8 @@ export const EVENT_TYPES = [
   { id: "nap", label: "Nap", emoji: "😴" },
   { id: "sleep", label: "Sleep", emoji: "🌙" },
   { id: "wake", label: "Wake", emoji: "☀️" },
+  { id: "walkies", label: "Walkies", emoji: "🦮" },
+  { id: "training", label: "Training", emoji: "🎓" },
 ];
 
 const STORAGE_PREFIX = "puppy-events";
@@ -12,7 +14,7 @@ const DELETED_EVENT_IDS_KEY = `${STORAGE_PREFIX}:deleted`;
 const TEN_MINUTES_IN_MS = 10 * 60 * 1000;
 const ONE_HOUR_IN_MS = 60 * 60 * 1000;
 const SLEEPING_EVENT_TYPES = new Set(["nap", "sleep"]);
-const AWAKE_EVENT_TYPES = new Set(["pee", "poop", "eat"]);
+const AWAKE_EVENT_TYPES = new Set(["pee", "poop", "eat", "walkies", "training"]);
 
 export function getTodayKey(date = new Date()) {
   const year = date.getFullYear();
