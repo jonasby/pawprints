@@ -1,7 +1,5 @@
 const SYNC_DEBOUNCE_MS = 500;
 
-const HUB_PATH = "/hubs/sync";
-
 export function getApiBaseUrl() {
   return (import.meta.env?.VITE_API_BASE_URL ?? "").replace(/\/$/, "");
 }
@@ -44,23 +42,6 @@ async function createApiError(response, path) {
   return error;
 }
 
-async function buildSignalRConnection(onRemoteSnapshot) {
-  const signalR = await import("@microsoft/signalr");
-  const connection = new signalR.HubConnectionBuilder()
-    .withUrl(createApiUrl(HUB_PATH), {
-      withCredentials: true,
-    })
-    .withAutomaticReconnect()
-    .configureLogging(signalR.LogLevel.Warning)
-    .build();
-
-  if (typeof onRemoteSnapshot === "function") {
-    connection.on("SnapshotUpdated", onRemoteSnapshot);
-  }
-
-  return connection;
-}
-
 export function createRemoteSync(
   storage,
   {
@@ -72,44 +53,10 @@ export function createRemoteSync(
     onInFlightChange,
     onEventsInFlightChange,
     onEventsSynced,
-    onRemoteSnapshot,
-    hubConnectionFactory,
   },
 ) {
-  let hubConnection;
   let pendingSyncId;
   const authPath = "/api/auth/me";
-
-  async function ensureHubStarted() {
-    if (hubConnectionFactory) {
-      if (!hubConnection) {
-        hubConnection = await hubConnectionFactory();
-      }
-    } else if (!hubConnection) {
-      hubConnection = await buildSignalRConnection(onRemoteSnapshot);
-    }
-
-    if (hubConnection.state !== "Connected") {
-      await hubConnection.start();
-    }
-
-    return hubConnection;
-  }
-
-  async function stopHub() {
-    if (!hubConnection || hubConnection.state === "Disconnected") {
-      hubConnection = null;
-      return;
-    }
-
-    try {
-      await hubConnection.stop();
-    } catch (error) {
-      console.error(error);
-    } finally {
-      hubConnection = null;
-    }
-  }
 
   async function syncNow() {
     const settings = getSettings();
@@ -127,15 +74,30 @@ export function createRemoteSync(
       onEventsInFlightChange?.(pendingUpsertIds, true);
       onStatusChange?.("Saving...");
 
-      const connection = await ensureHubStarted();
-      await connection.invoke("PushSnapshot", {
-        settings: {
-          arrivalDate: settings.arrivalDate,
-          birthDate: settings.birthDate,
+      const response = await fetch(createApiUrl("/api/sync"), {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
         },
-        upserts: pendingChanges.upserts,
-        deletedEventIds: pendingChanges.deletedEventIds,
+        credentials: "include",
+        body: JSON.stringify({
+          settings: {
+            arrivalDate: settings.arrivalDate,
+            birthDate: settings.birthDate,
+          },
+          upserts: pendingChanges.upserts,
+          deletedEventIds: pendingChanges.deletedEventIds,
+        }),
       });
+
+      if (response.status === 401 || response.status === 403) {
+        onStatusChange?.("Sign in to sync");
+        return;
+      }
+
+      if (!response.ok) {
+        throw new Error(`PawPrints sync failed with ${response.status}`);
+      }
 
       markChangesCommitted?.(storage, {
         upsertIds: pendingUpsertIds,
@@ -143,12 +105,6 @@ export function createRemoteSync(
       });
       onEventsSynced?.(pendingUpsertIds);
       onStatusChange?.("Saved");
-    } catch (error) {
-      if (isUnauthorizedHubError(error)) {
-        onStatusChange?.("Sign in to sync");
-        return;
-      }
-      throw error;
     } finally {
       onEventsInFlightChange?.(pendingUpsertIds, false);
       onInFlightChange?.(false);
@@ -228,16 +184,31 @@ export function createRemoteSync(
       return null;
     },
     async loadSnapshot() {
-      const connection = await ensureHubStarted();
-      const snapshot = await connection.invoke("GetSnapshot");
-      if (snapshot == null) {
+      const path = "/api/sync";
+      const response = await fetch(createApiUrl(path), { credentials: "include" });
+      if (response.status === 204 || response.status === 404) {
         return null;
       }
 
-      return snapshot;
+      if (!response.ok) {
+        throw await createApiError(response, path);
+      }
+
+      const raw = await response.text();
+      if (!raw.trim()) {
+        return null;
+      }
+
+      try {
+        return JSON.parse(raw);
+      } catch {
+        const error = new Error(`PawPrints snapshot response was not valid JSON at ${path}`);
+        error.path = path;
+        error.responseText = raw.slice(0, 2000);
+        throw error;
+      }
     },
     async signOut() {
-      await stopHub();
       await fetch(createApiUrl("/api/auth/logout"), {
         method: "POST",
         credentials: "include",
@@ -295,18 +266,4 @@ export function createRemoteSync(
       throw await createApiError(response, path);
     },
   };
-}
-
-function isUnauthorizedHubError(error) {
-  if (error?.statusCode === 401 || error?.statusCode === 403) {
-    return true;
-  }
-
-  const message = typeof error?.message === "string" ? error.message : "";
-  return (
-    message.includes("401")
-    || message.includes("403")
-    || message.includes("Unauthorized")
-    || message.includes("Forbidden")
-  );
 }

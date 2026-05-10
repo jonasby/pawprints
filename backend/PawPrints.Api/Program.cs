@@ -6,7 +6,6 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.EntityFrameworkCore;
 using PawPrints.Api;
 using PawPrints.Api.Data;
-using PawPrints.Api.Hubs;
 using PawPrints.Api.Import;
 using PawPrints.Api.Invites;
 using PawPrints.Api.Middleware;
@@ -37,13 +36,6 @@ try
     var isDevelopment = builder.Environment.IsDevelopment();
 
     builder.Services.AddEndpointsApiExplorer();
-    builder.Services.AddSignalR(options =>
-    {
-        if (isDevelopment || builder.Environment.IsEnvironment("Testing"))
-        {
-            options.EnableDetailedErrors = true;
-        }
-    });
     builder.Services.AddSwaggerGen();
     builder.Services.AddHttpContextAccessor();
     builder.Services.AddScoped<CurrentUser>();
@@ -430,7 +422,34 @@ try
         }
     );
 
-    app.MapHub<SyncHub>("/hubs/sync");
+    app.MapGet(
+        "/api/sync",
+        [Authorize(Policy = AuthenticatedPawPrintsUserPolicy)]
+        async (
+            CurrentUser currentUser,
+            SnapshotSyncService syncService,
+            CancellationToken cancellationToken
+        ) =>
+        {
+            var snapshot = await syncService.GetSnapshotAsync(currentUser.Email, cancellationToken);
+            return snapshot is null ? Results.NoContent() : Results.Ok(snapshot);
+        }
+    );
+
+    app.MapPut(
+        "/api/sync",
+        [Authorize(Policy = AuthenticatedPawPrintsUserPolicy)]
+        async (
+            SyncSnapshotRequest snapshot,
+            CurrentUser currentUser,
+            SnapshotSyncService syncService,
+            CancellationToken cancellationToken
+        ) =>
+        {
+            await syncService.SyncAsync(currentUser.Email, currentUser.Subject, snapshot, cancellationToken);
+            return Results.NoContent();
+        }
+    );
 
     app.MapPost(
         "/api/import/resolve-tokens",

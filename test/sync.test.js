@@ -56,18 +56,6 @@ test("GivenPendingEvents_WhenSyncRuns_ThenEventIdsAreMarkedInFlightAndSynced", a
           onEventsSynced: (eventIds) => {
             eventStatusChanges.push({ eventIds, isSynced: true });
           },
-          hubConnectionFactory: async () => ({
-            state: "Connected",
-            start: async () => {},
-            stop: async () => {},
-            invoke: async (method) => {
-              if (method === "PushSnapshot") {
-                return;
-              }
-              throw new Error(`Unexpected hub method ${method}`);
-            },
-            on: () => {},
-          }),
         },
       );
 

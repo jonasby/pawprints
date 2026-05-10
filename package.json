@@ -8,9 +8,6 @@
     "start": "vite --host 0.0.0.0",
     "build": "vite build"
   },
-  "dependencies": {
-    "@microsoft/signalr": "^8.0.7"
-  },
   "devDependencies": {
     "@vitejs/plugin-basic-ssl": "^2.3.0",
     "vite": "latest"
