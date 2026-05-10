@@ -44,7 +44,7 @@ jobs:
           dotnet-version: "8.0.x"
 
       - name: Test API
-        run: dotnet test PawPrints.sln --configuration Release
+        run: dotnet test backend/PawPrints.sln --configuration Release
 
       - name: Prepare API wwwroot with SPA assets
         run: |
