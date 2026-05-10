@@ -704,6 +704,7 @@ button.primary-link {
 }
 
 .event-chip {
+  position: relative;
   display: inline-flex;
   gap: 3px;
   align-items: baseline;
@@ -713,6 +714,65 @@ button.primary-link {
   background: transparent;
   cursor: pointer;
   line-height: 1.05;
+}
+
+.event-chip.is-syncing,
+.event-chip.is-synced {
+  padding-right: 14px;
+}
+
+.event-sync-indicator {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border: 1px solid #fed7aa;
+  border-radius: 999px;
+  color: #fff;
+  background: #9a5a20;
+  font-size: 0.66rem;
+  font-weight: 900;
+  line-height: 1;
+  box-shadow: 0 1px 3px rgb(47 36 29 / 0.14);
+  pointer-events: none;
+}
+
+.event-sync-indicator-syncing::before {
+  content: "";
+  width: 8px;
+  height: 8px;
+  border: 2px solid rgb(255 255 255 / 0.45);
+  border-top-color: #fff;
+  border-radius: 999px;
+  animation: subtle-spin 0.7s linear infinite;
+}
+
+.event-sync-indicator-synced {
+  background: #16a34a;
+  animation: synced-tick-fade 1.4s ease-out forwards;
+}
+
+@keyframes synced-tick-fade {
+  0% {
+    opacity: 0;
+    transform: scale(0.72);
+  }
+  18% {
+    opacity: 1;
+    transform: scale(1.08);
+  }
+  55% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(0.92);
+  }
 }
 
 .event-chip-emoji {

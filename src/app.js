@@ -38,6 +38,7 @@ const dateFormatter = new Intl.DateTimeFormat(undefined, {
 const SETTINGS_KEY = "pawprints-settings";
 const HAS_SIGNED_IN_KEY = "pawprints-has-signed-in";
 const AUTH_RETURN_QUERY_KEY = "authReturn";
+const SYNCED_TICK_VISIBLE_MS = 1400;
 
 const defaultSettings = {
   arrivalDate: "",
@@ -164,7 +165,43 @@ function getLogSummary({ date, dateKey, settings, events }) {
   return pieces.join(" · ");
 }
 
-function renderEvents({ eventList, emptyState, logSummary, date, dateKey, settings }) {
+function getEventSyncState(event, syncAnimationState) {
+  if (syncAnimationState?.inFlightEventIds.has(event.id)) {
+    return "syncing";
+  }
+
+  if (syncAnimationState?.recentlySyncedEventIds.has(event.id)) {
+    return "synced";
+  }
+
+  return "";
+}
+
+function getEventSyncIndicatorMarkup(syncState) {
+  if (!syncState) {
+    return "";
+  }
+
+  const label = syncState === "syncing" ? "Syncing" : "Synced";
+  const tick = syncState === "synced" ? "&#10003;" : "";
+
+  return `
+    <span class="event-sync-indicator event-sync-indicator-${syncState}" aria-hidden="true">
+      ${tick}
+    </span>
+    <span class="visually-hidden">${label}</span>
+  `;
+}
+
+function renderEvents({
+  eventList,
+  emptyState,
+  logSummary,
+  date,
+  dateKey,
+  settings,
+  syncAnimationState,
+}) {
   const events = getEventsForDate(window.localStorage, date);
   const eventGroups = getEventGroupsDescending(events);
 
@@ -210,17 +247,23 @@ function renderEvents({ eventList, emptyState, logSummary, date, dateKey, settin
       <span class="event-stack" aria-label="${eventNames}">
         ${knownEvents
           .map(
-            ({ event, eventType }) => `
+            ({ event, eventType }) => {
+              const syncState = getEventSyncState(event, syncAnimationState);
+              const syncClass = syncState ? ` is-${syncState}` : "";
+
+              return `
               <button
-                class="event-chip"
+                class="event-chip${syncClass}"
                 type="button"
                 data-remove-event="${event.id}"
                 aria-label="Remove ${eventType.label} event"
               >
                 <span class="event-chip-emoji" aria-hidden="true">${eventType.emoji}</span>
                 <span class="event-chip-label">${eventType.label}</span>
+                ${getEventSyncIndicatorMarkup(syncState)}
               </button>
-            `,
+            `;
+            },
           )
           .join("")}
       </span>
@@ -477,6 +520,58 @@ export function renderPuppyLog() {
     syncStatus.classList.add("sync-status");
   }
 
+  const syncAnimationState = {
+    inFlightEventIds: new Set(),
+    recentlySyncedEventIds: new Set(),
+    clearSyncedTimers: new Map(),
+  };
+
+  function clearEventSyncTimer(eventId) {
+    const timerId = syncAnimationState.clearSyncedTimers.get(eventId);
+    if (timerId) {
+      window.clearTimeout(timerId);
+      syncAnimationState.clearSyncedTimers.delete(eventId);
+    }
+  }
+
+  function setEventsInFlight(eventIds, isInFlight) {
+    if (!eventIds.length) {
+      return;
+    }
+
+    eventIds.forEach((eventId) => {
+      if (isInFlight) {
+        clearEventSyncTimer(eventId);
+        syncAnimationState.recentlySyncedEventIds.delete(eventId);
+        syncAnimationState.inFlightEventIds.add(eventId);
+      } else {
+        syncAnimationState.inFlightEventIds.delete(eventId);
+      }
+    });
+    renderState();
+  }
+
+  function markEventsSynced(eventIds) {
+    if (!eventIds.length) {
+      return;
+    }
+
+    eventIds.forEach((eventId) => {
+      clearEventSyncTimer(eventId);
+      syncAnimationState.inFlightEventIds.delete(eventId);
+      syncAnimationState.recentlySyncedEventIds.add(eventId);
+      syncAnimationState.clearSyncedTimers.set(
+        eventId,
+        window.setTimeout(() => {
+          syncAnimationState.recentlySyncedEventIds.delete(eventId);
+          syncAnimationState.clearSyncedTimers.delete(eventId);
+          renderState();
+        }, SYNCED_TICK_VISIBLE_MS),
+      );
+    });
+    renderState();
+  }
+
   const remoteSync = createRemoteSync(window.localStorage, {
     getSettings: () => settings,
     loadEvents: getStoredEvents,
@@ -494,6 +589,8 @@ export function renderPuppyLog() {
     onSyncComplete() {
       loadAndRenderPredictions();
     },
+    onEventsInFlightChange: setEventsInFlight,
+    onEventsSynced: markEventsSynced,
   });
 
   authUrlElements.forEach((element) => {
@@ -721,6 +818,7 @@ export function renderPuppyLog() {
       date: selectedDate,
       dateKey: selectedDateKey,
       settings,
+      syncAnimationState,
     });
     renderPredictions({ predictionList, predictions: activePredictions });
   };
