@@ -7,6 +7,7 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -203,9 +204,11 @@ public sealed class SyncApiTests
 public sealed class PawPrintsApiApplication : WebApplicationFactory<Program>, IAsyncLifetime
 {
     private readonly SqliteConnection _connection = new("DataSource=:memory:");
+    private readonly TimeProvider? _timeProvider;
 
-    public PawPrintsApiApplication()
+    public PawPrintsApiApplication(TimeProvider? timeProvider = null)
     {
+        _timeProvider = timeProvider;
         _connection.Open();
     }
 
@@ -240,6 +243,26 @@ public sealed class PawPrintsApiApplication : WebApplicationFactory<Program>, IA
             }
 
             services.AddDbContext<PawPrintsDbContext>(options => options.UseSqlite(_connection));
+            if (_timeProvider is not null)
+            {
+                var timeProviderDescriptor = services.SingleOrDefault(service =>
+                    service.ServiceType == typeof(TimeProvider));
+                if (timeProviderDescriptor is not null)
+                {
+                    services.Remove(timeProviderDescriptor);
+                }
+
+                services.AddSingleton(_timeProvider);
+            }
+
+            var hostedServiceDescriptors = services
+                .Where(service => service.ServiceType == typeof(IHostedService))
+                .ToArray();
+            foreach (var hostedServiceDescriptor in hostedServiceDescriptors)
+            {
+                services.Remove(hostedServiceDescriptor);
+            }
+
             services.AddHostedService<SqliteSchemaInitializer>();
             services.AddAuthentication(TestAuthHandler.SchemeName)
                 .AddPolicyScheme("DefaultTestScheme", null, options =>

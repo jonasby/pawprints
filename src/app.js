@@ -6,6 +6,7 @@ import {
   clampDateKey,
   clampOccurredAtForLogDay,
   formatCompactTimeValue,
+  formatEventTime,
   getEventGroupsDescending,
   getEventsForDate,
   getPendingSyncChanges,
@@ -387,6 +388,80 @@ function paintImportPreviewOut(container, preview, errors) {
   }
 }
 
+function formatPredictionTime(value) {
+  if (!value) {
+    return "";
+  }
+
+  return formatEventTime(value);
+}
+
+function getPredictionLabel(type) {
+  if (type === "nap_wake") {
+    return "Nap wake";
+  }
+
+  if (type === "poop_need") {
+    return "Poo";
+  }
+
+  return "Prediction";
+}
+
+function renderPredictions({ predictionList, predictions }) {
+  if (!predictionList) {
+    return;
+  }
+
+  predictionList.replaceChildren();
+  if (!predictions.length) {
+    const item = document.createElement("li");
+    item.className = "prediction-list-item is-empty";
+    item.textContent = "No active predictions yet.";
+    predictionList.appendChild(item);
+    return;
+  }
+
+  predictions.forEach((prediction) => {
+    const item = document.createElement("li");
+    item.className = "prediction-list-item";
+    const label = getPredictionLabel(prediction.type);
+    const windowStart = formatPredictionTime(prediction.windowStart);
+    const bestGuess = formatPredictionTime(prediction.bestGuessAt);
+    const windowEnd = formatPredictionTime(prediction.windowEnd);
+    const confidence = Number.isFinite(Number(prediction.confidence))
+      ? `${Math.round(Number(prediction.confidence) * 100)}%`
+      : "";
+
+    item.innerHTML = `
+      <span class="prediction-type">${label}</span>
+      <span class="prediction-window">${windowStart}-${windowEnd}</span>
+      <span class="prediction-detail">${bestGuess ? `Best guess ${bestGuess}` : ""}${confidence ? ` · ${confidence}` : ""}</span>
+    `;
+    predictionList.appendChild(item);
+  });
+}
+
+async function notifyUser(notification) {
+  if (!("Notification" in window)) {
+    return false;
+  }
+
+  if (Notification.permission === "default") {
+    await Notification.requestPermission();
+  }
+
+  if (Notification.permission !== "granted") {
+    return false;
+  }
+
+  new Notification(notification.title, {
+    body: notification.body,
+    tag: `pawprints-${notification.id}`,
+  });
+  return true;
+}
+
 export function renderPuppyLog() {
   const eventButtons = document.querySelector("[data-event-buttons]");
   const eventList = document.querySelector("[data-event-list]");
@@ -429,6 +504,9 @@ export function renderPuppyLog() {
   const importPreviewOut = document.querySelector("[data-import-preview-out]");
   const importStatus = document.querySelector("[data-import-status]");
   const undoButton = document.querySelector("[data-undo]");
+  const predictionSection = document.querySelector("[data-predictions-section]");
+  const predictionList = document.querySelector("[data-prediction-list]");
+  const predictionStatus = document.querySelector("[data-prediction-status]");
   const settings = loadSettings();
   const todayKey = getTodayKey();
   let isSignedIn = false;
@@ -436,6 +514,8 @@ export function renderPuppyLog() {
   let isCheckingSession = false;
   let bootstrapError = null;
   let accountProfile = null;
+  let activePredictions = [];
+  let notificationPollId = 0;
   if (syncStatus) {
     syncStatus.classList.add("sync-status");
   }
@@ -506,6 +586,9 @@ export function renderPuppyLog() {
         syncStatus.classList.toggle("is-in-flight", isInFlight);
       }
     },
+    onSyncComplete() {
+      loadAndRenderPredictions();
+    },
     onEventsInFlightChange: setEventsInFlight,
     onEventsSynced: markEventsSynced,
   });
@@ -535,6 +618,7 @@ export function renderPuppyLog() {
   let importPreview = null;
 
   const TEN_MINUTES_MS = 10 * 60 * 1000;
+  const NOTIFICATION_POLL_MS = 5 * 60 * 1000;
 
   function materializeRemoteEventsWindow(windowMinKey, windowMaxKey) {
     loadedEventWindowMinKey = windowMinKey;
@@ -589,6 +673,61 @@ export function renderPuppyLog() {
     }
   }
 
+  async function loadAndRenderPredictions() {
+    if (!isSignedIn) {
+      activePredictions = [];
+      renderState();
+      return;
+    }
+
+    try {
+      activePredictions = await remoteSync.loadPredictions();
+      if (predictionStatus) {
+        predictionStatus.textContent = activePredictions.length
+          ? "Notifications watch these windows."
+          : "Predictions appear after enough matching history.";
+      }
+      renderState();
+    } catch (error) {
+      console.error(error);
+      if (predictionStatus) {
+        predictionStatus.textContent = "Could not load predictions.";
+      }
+    }
+  }
+
+  async function pollDueNotifications() {
+    if (!isSignedIn) {
+      return;
+    }
+
+    try {
+      const notifications = await remoteSync.claimDueNotifications();
+      for (const notification of notifications) {
+        const displayed = await notifyUser(notification);
+        if (!displayed && predictionStatus) {
+          predictionStatus.textContent = `${notification.title}: ${notification.body}`;
+        }
+      }
+      if (notifications.length > 0) {
+        await loadAndRenderPredictions();
+      }
+    } catch (error) {
+      console.error(error);
+    }
+  }
+
+  function startNotificationPolling() {
+    window.clearInterval(notificationPollId);
+    pollDueNotifications();
+    notificationPollId = window.setInterval(pollDueNotifications, NOTIFICATION_POLL_MS);
+  }
+
+  function stopNotificationPolling() {
+    window.clearInterval(notificationPollId);
+    notificationPollId = 0;
+  }
+
   logDateInput.value = selectedDateKey;
   logDateInput.max = todayKey;
   arrivalDateInput.value = settings.arrivalDate;
@@ -640,6 +779,10 @@ export function renderPuppyLog() {
       importSection.toggleAttribute("hidden", !isSetupComplete);
     }
 
+    if (predictionSection) {
+      predictionSection.toggleAttribute("hidden", !isSetupComplete);
+    }
+
     if (importAiButton) {
       importAiButton.hidden = !isSignedIn || !isSetupComplete;
     }
@@ -677,6 +820,7 @@ export function renderPuppyLog() {
       settings,
       syncAnimationState,
     });
+    renderPredictions({ predictionList, predictions: activePredictions });
   };
 
   logoutForm.addEventListener("submit", (event) => {
@@ -685,9 +829,13 @@ export function renderPuppyLog() {
       isSignedIn = false;
       accountProfile = null;
       bootstrapError = null;
+      stopNotificationPolling();
+      activePredictions = [];
       cachedRemoteSnapshotEvents = [];
       loadedEventWindowMinKey = "";
       loadedEventWindowMaxKey = "";
+      activePredictions = [];
+      stopNotificationPolling();
       undoStack.length = 0;
       if (undoButton) {
         undoButton.disabled = true;
@@ -1181,12 +1329,18 @@ export function renderPuppyLog() {
             loadedEventWindowMaxKey = "";
           }
         }
+
+        await loadAndRenderPredictions();
       } catch (snapshotError) {
         console.error(snapshotError);
         if (!snapshotError.phase) {
           snapshotError.phase = "snapshot-load";
         }
         bootstrapError = snapshotError;
+      }
+
+      if (!bootstrapError) {
+        startNotificationPolling();
       }
     } catch (error) {
       console.error(error);

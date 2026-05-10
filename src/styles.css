@@ -334,6 +334,46 @@ h2 {
   font-size: 0.85rem;
 }
 
+.prediction-list {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.prediction-list-item {
+  display: grid;
+  gap: 3px;
+  padding: 10px 12px;
+  border: 1px solid #fed7aa;
+  border-radius: 12px;
+  background: #fff;
+}
+
+.prediction-list-item.is-empty {
+  color: #7c5a45;
+  font-size: 0.9rem;
+}
+
+.prediction-type {
+  color: #5c4334;
+  font-weight: 850;
+}
+
+.prediction-window {
+  color: #9a5a20;
+  font-size: 1.05rem;
+  font-weight: 850;
+}
+
+.prediction-detail,
+.prediction-status {
+  margin: 0;
+  color: #7c5a45;
+  font-size: 0.84rem;
+}
+
 .invite-expiry {
   margin: 0;
   color: #9a5a20;
